@@ -7,7 +7,7 @@ import {
 
 export default function Legend() {
   return (
-    <div className="absolute top-3 right-3 z-10 bg-white/92 border border-line rounded-md px-3 py-2 shadow-sm text-[11px] font-jp">
+    <div className="hidden sm:block absolute top-3 right-3 z-10 bg-white/92 border border-line rounded-md px-3 py-2 shadow-sm text-[11px] font-jp">
       <div className="font-bold text-ink mb-1">ノードの種類</div>
       <div className="flex flex-col gap-1 mb-2">
         {NODE_TYPE_ORDER.map((k) => (

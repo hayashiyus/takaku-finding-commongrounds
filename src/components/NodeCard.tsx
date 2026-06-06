@@ -8,6 +8,7 @@ export interface NodeCardData {
   text: string;
   author: string;
   isFinal?: boolean;
+  dimmed?: boolean;
 }
 
 export default function NodeCard({ data, selected }: NodeProps) {
@@ -20,6 +21,8 @@ export default function NodeCard({ data, selected }: NodeProps) {
         border: `${d.isFinal ? 3 : 1.6}px solid ${d.isFinal ? '#d97706' : meta.color}`,
         width: 210,
         boxShadow: selected ? `0 0 0 3px ${meta.color}33` : undefined,
+        opacity: d.dimmed ? 0.28 : 1,
+        transition: 'opacity 0.3s ease',
       }}
     >
       <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />

@@ -61,7 +61,7 @@ npm run build    # tsc -b && vite build
   - 検証：dev endpoint まで疎通（キー有効・構造化エラー確認）。**LLM出力の最終確認は Anthropic クレジット残高待ち**（console.anthropic.com → Plans & Billing）。
   - 知見：e5は同言語短文だと無関係でも cosine≈0.79 → fallback floor を 0.82 に調整。LLMモードは recall優先（floor≤0.40）で候補化し、LLMが最終判定。
   - コスト実測見積：Haiku 4.5（$1/$5 per MTok）で ~$0.003/node ＝ 200node で ~$0.6（数十〜数百円, §12内）。
-- [ ] Phase 4 可視化・「整える」アニメ・投影耐性（fitView再適用も対応）
+- [x] **Phase 4** 可視化・体験：CSS transitionで「整える」滑らか移動、fitView再適用（追加/整える/リサイズ）、クリックで近傍ハイライト（非近傍を減光）、Legend/TopBarのレスポンシブ、1920×1080投影で可読を確認
 - [ ] Phase 5 タイムライン再生・FINAL IDEA・PDF
 - [ ] Phase 6 検証・負荷/実機/投影・デプロイ
 

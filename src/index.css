@@ -25,3 +25,11 @@ body {
   font-size: 9px;
   opacity: 0.5;
 }
+
+/* 「整える」/ノード追加時の位置移動を滑らかに（散在→ひとつの像 / SPEC §7.6・§8.3）。
+   ドラッグ中はトランジションを無効化して追従させる。 */
+.react-flow__node:not(.dragging) {
+  transition:
+    transform 0.55s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.3s ease;
+}

@@ -1,11 +1,11 @@
-import { useMemo } from 'react';
-import {
-  Background,
-  Controls,
-  MiniMap,
-  ReactFlow,
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Background, Controls, MiniMap, ReactFlow } from '@xyflow/react';
+import type {
+  Edge,
+  Node,
+  NodeMouseHandler,
+  ReactFlowInstance,
 } from '@xyflow/react';
-import type { Edge, Node } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import NodeCard from './NodeCard';
 import { useGraphStore } from '../store/graphStore';
@@ -14,7 +14,7 @@ import type { GraphNode, NodeType } from '../types';
 
 const nodeTypes = { thought: NodeCard };
 
-// Phase 0/1 用の素朴なバンド配置（型ごとに行、追加順に列）。Phase 4 で d3-force「整える」に置換。
+// 位置未確定ノードの素朴なバンド配置（「整える」前の初期配置）。
 const BAND_Y: Record<NodeType, number> = {
   hypothesis: 80,
   idea: 260,
@@ -28,6 +28,19 @@ function bandPosition(node: GraphNode, indexInType: number) {
 export default function GraphCanvas() {
   const nodes = useGraphStore((s) => s.nodes);
   const edges = useGraphStore((s) => s.edges);
+  const [selected, setSelected] = useState<string | null>(null);
+  const rf = useRef<ReactFlowInstance | null>(null);
+
+  // 近傍ハイライト用（選択ノードと、線でつながる相手）
+  const neighbors = useMemo(() => {
+    if (!selected) return null;
+    const set = new Set<string>([selected]);
+    for (const e of edges) {
+      if (e.source_id === selected) set.add(e.target_id);
+      if (e.target_id === selected) set.add(e.source_id);
+    }
+    return set;
+  }, [selected, edges]);
 
   const rfNodes: Node[] = useMemo(() => {
     const counters: Record<NodeType, number> = {
@@ -45,15 +58,25 @@ export default function GraphCanvas() {
         id: n.id,
         type: 'thought',
         position: pos,
-        data: { type: n.type, text: n.text, author: n.author_name, isFinal: n.is_final },
+        data: {
+          type: n.type,
+          text: n.text,
+          author: n.author_name,
+          isFinal: n.is_final,
+          dimmed: neighbors ? !neighbors.has(n.id) : false,
+        },
       };
     });
-  }, [nodes]);
+  }, [nodes, neighbors]);
 
   const rfEdges: Edge[] = useMemo(
     () =>
       edges.map((e) => {
         const meta = RELATION_META[e.relation];
+        const touches = selected
+          ? e.source_id === selected || e.target_id === selected
+          : true;
+        const baseOp = 0.5 + Math.min(0.5, e.confidence * 0.5);
         return {
           id: e.id,
           source: e.source_id,
@@ -61,26 +84,63 @@ export default function GraphCanvas() {
           label: meta.jaLabel,
           labelStyle: { fontSize: 11, fill: meta.color, fontWeight: 700 },
           labelBgStyle: { fill: '#ffffff', fillOpacity: 0.9 },
+          animated: selected ? touches : false,
           style: {
             stroke: meta.color,
-            strokeWidth: meta.width,
+            strokeWidth: touches ? meta.width + 0.6 : meta.width,
             strokeDasharray: meta.dash,
-            opacity: 0.5 + Math.min(0.5, e.confidence * 0.5),
+            opacity: selected ? (touches ? 0.95 : 0.12) : baseOp,
           },
         };
       }),
-    [edges],
+    [edges, selected],
   );
+
+  // ノード追加・「整える」時に自動で全体表示へ（投影で見切れない / fitView再適用）
+  useEffect(() => {
+    const inst = rf.current;
+    if (!inst) return;
+    const t = setTimeout(
+      () => inst.fitView({ duration: 550, padding: 0.2, maxZoom: 1.2 }),
+      320,
+    );
+    return () => clearTimeout(t);
+  }, [nodes]);
+
+  // 画面サイズ変更（スマホ↔投影、回転）で全体表示を保つ
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout>;
+    const onResize = () => {
+      clearTimeout(t);
+      t = setTimeout(
+        () => rf.current?.fitView({ duration: 300, padding: 0.2, maxZoom: 1.2 }),
+        150,
+      );
+    };
+    window.addEventListener('resize', onResize);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener('resize', onResize);
+    };
+  }, []);
+
+  const onNodeClick: NodeMouseHandler = useCallback((_, node) => {
+    setSelected((p) => (p === node.id ? null : node.id));
+  }, []);
 
   return (
     <ReactFlow
       nodes={rfNodes}
       edges={rfEdges}
       nodeTypes={nodeTypes}
+      onInit={(inst) => {
+        rf.current = inst;
+      }}
+      onNodeClick={onNodeClick}
+      onPaneClick={() => setSelected(null)}
       fitView
       minZoom={0.2}
       maxZoom={2}
-      proOptions={{ hideAttribution: false }}
     >
       <Background color="#e3decf" gap={28} />
       <MiniMap

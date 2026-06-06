@@ -47,10 +47,26 @@ npm run build    # tsc -b && vite build
 ```
 
 ## デプロイ（サーバ運用なし / SPEC §14）
-1. このディレクトリ（`takaku-app/`）を Vercel に Import（Framework: Vite を自動検出）。
-2. 環境変数（`VITE_*` とサーバ専用 `LLM_*` / `LINK_CONFIDENCE_THRESHOLD`）を設定。
-3. Deploy。`api/*.ts` は自動でサーバレス関数になる。
-4. 発行URLを2端末（PC＋実機スマホ）で開き、`../PLAN.md` §6 / SPEC §12 の受け入れ基準を確認。本番前に会場ネットワークで疎通確認。
+1. このディレクトリ（`takaku-app/`）を Vercel に Import。**Root Directory に `takaku-app` を指定**（Framework: Vite を自動検出。Build `vite build` / Output `dist`）。
+2. **環境変数を設定**（下表）。`VITE_*` はクライアント公開可、それ以外はサーバ専用（クライアントへ出さない）。
+3. Deploy。`api/*.ts` は自動で関数化。`vercel.json` の rewrite で `/r/:roomId` 直リンクも index.html へ。
+4. 発行URLを2端末（PC＋実機スマホ）で開き、SPEC §12 の受け入れ基準を確認。**本番前に会場ネットワークで WebSocket 疎通を必ず確認**。
+
+### 本番 環境変数チェックリスト
+| 変数 | 例 / 値 | 公開 |
+|---|---|---|
+| `VITE_SUPABASE_URL` | https://xxx.supabase.co | クライアント |
+| `VITE_SUPABASE_ANON_KEY` | sb_publishable_... | クライアント |
+| `VITE_EMBEDDING_MODEL` | Xenova/multilingual-e5-small | クライアント |
+| `VITE_FEATURE_LLM_LINKING` | `true`（LLM型付き）/ `false`（類似度のみ） | クライアント |
+| `VITE_LINK_TOPK` | 6 | クライアント |
+| `VITE_LINK_SIM_FLOOR` | 0.80（LLM時は内部で≤0.40に） | クライアント |
+| `LLM_PROVIDER` | anthropic | **サーバ専用** |
+| `LLM_MODEL` | claude-haiku-4-5 | **サーバ専用** |
+| `LLM_API_KEY` | sk-ant-... | **サーバ専用** |
+| `LINK_CONFIDENCE_THRESHOLD` | 0.6 | **サーバ専用** |
+
+> LLM型付き分類を使うには **Anthropic アカウントにクレジットが必要**（実測見積 200ノードで ~$0.6）。未設定/残高無しでも `VITE_FEATURE_LLM_LINKING=false` で類似度fallback動作。
 
 ## 実装フェーズ（現況）
 - [x] **Phase 0** 足場（Vite+React+TS+Tailwind、schema、型、ルーティング、各種スケルトン）
@@ -63,7 +79,7 @@ npm run build    # tsc -b && vite build
   - コスト実測見積：Haiku 4.5（$1/$5 per MTok）で ~$0.003/node ＝ 200node で ~$0.6（数十〜数百円, §12内）。
 - [x] **Phase 4** 可視化・体験：CSS transitionで「整える」滑らか移動、fitView再適用（追加/整える/リサイズ）、クリックで近傍ハイライト（非近傍を減光）、Legend/TopBarのレスポンシブ、1920×1080投影で可読を確認
 - [x] **Phase 5** 署名機能：タイムライン再生（追加順に出現＋スクラブ）/ FINAL IDEA（rooms.final_idea保存・is_final強調）/ PDF出力（グラフ画像＋ノード一覧＋FINAL、JPEG化で約4MB・0.5秒）/ 共有URL・Presence
-- [ ] Phase 6 検証・負荷/実機/投影・デプロイ（任意：/api/synthesize 要約）
+- [~] **Phase 6** 検証・デプロイ：20クライアント/100ノード負荷テスト ✅（100挿入0失敗・realtime100受信・100ノード描画）/ §12セルフレビュー ✅ / vercel.json・env手順整備 ✅ ／ **残：Vercelデプロイ実行・実機スマホ・会場NW疎通（環境依存=ユーザー側）**・LLMクレジット投入・（任意）/api/synthesize
 
 ## プライバシー（未成年利用 / SPEC §16）
 個人情報は収集しない。表示名（ニックネーム）のみ。認証なし。ルームは一時的。

@@ -7,7 +7,11 @@ interface GraphState {
   presence: PresenceUser[];
   myName: string;
   embById: Record<string, number[]>; // 端末内で算出した埋め込み（Phase 2）
+  replayStep: number | null; // タイムライン再生：表示するノード数（null=全部）
+  finalIdea: string; // FINAL IDEA本文
   setMyName: (n: string) => void;
+  setReplayStep: (n: number | null) => void;
+  setFinalIdea: (s: string) => void;
   setNodes: (n: GraphNode[]) => void;
   setEdges: (e: GraphEdge[]) => void;
   upsertNode: (n: GraphNode) => void;
@@ -23,7 +27,11 @@ export const useGraphStore = create<GraphState>((set) => ({
   presence: [],
   myName: '',
   embById: {},
+  replayStep: null,
+  finalIdea: '',
   setMyName: (n) => set({ myName: n }),
+  setReplayStep: (n) => set({ replayStep: n }),
+  setFinalIdea: (s) => set({ finalIdea: s }),
   setNodes: (nodes) => set({ nodes }),
   setEdges: (edges) => set({ edges }),
   upsertNode: (n) =>
@@ -49,5 +57,13 @@ export const useGraphStore = create<GraphState>((set) => ({
   setEmbedding: (id, emb) =>
     set((s) => ({ embById: { ...s.embById, [id]: emb } })),
   setPresence: (presence) => set({ presence }),
-  reset: () => set({ nodes: [], edges: [], presence: [], embById: {} }),
+  reset: () =>
+    set({
+      nodes: [],
+      edges: [],
+      presence: [],
+      embById: {},
+      replayStep: null,
+      finalIdea: '',
+    }),
 }));

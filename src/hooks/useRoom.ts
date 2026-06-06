@@ -7,6 +7,7 @@ import type { GraphEdge, GraphNode, Room } from '../types';
 export function useRoom(roomId: string) {
   const setNodes = useGraphStore((s) => s.setNodes);
   const setEdges = useGraphStore((s) => s.setEdges);
+  const setFinalIdea = useGraphStore((s) => s.setFinalIdea);
   const [room, setRoom] = useState<Room | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -33,7 +34,9 @@ export function useRoom(roomId: string) {
         .select('*')
         .eq('room_id', roomId);
       if (cancelled) return;
-      setRoom((roomRow as Room) ?? { id: roomId });
+      const r = (roomRow as Room) ?? { id: roomId };
+      setRoom(r);
+      setFinalIdea(r.final_idea ?? '');
       setNodes((nodes as GraphNode[]) ?? []);
       setEdges((edges as GraphEdge[]) ?? []);
       setLoading(false);
@@ -42,7 +45,7 @@ export function useRoom(roomId: string) {
     return () => {
       cancelled = true;
     };
-  }, [roomId, setNodes, setEdges]);
+  }, [roomId, setNodes, setEdges, setFinalIdea]);
 
   return { room, loading };
 }

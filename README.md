@@ -62,8 +62,8 @@ npm run build    # tsc -b && vite build
   - 知見：e5は同言語短文だと無関係でも cosine≈0.79 → fallback floor を 0.82 に調整。LLMモードは recall優先（floor≤0.40）で候補化し、LLMが最終判定。
   - コスト実測見積：Haiku 4.5（$1/$5 per MTok）で ~$0.003/node ＝ 200node で ~$0.6（数十〜数百円, §12内）。
 - [x] **Phase 4** 可視化・体験：CSS transitionで「整える」滑らか移動、fitView再適用（追加/整える/リサイズ）、クリックで近傍ハイライト（非近傍を減光）、Legend/TopBarのレスポンシブ、1920×1080投影で可読を確認
-- [ ] Phase 5 タイムライン再生・FINAL IDEA・PDF
-- [ ] Phase 6 検証・負荷/実機/投影・デプロイ
+- [x] **Phase 5** 署名機能：タイムライン再生（追加順に出現＋スクラブ）/ FINAL IDEA（rooms.final_idea保存・is_final強調）/ PDF出力（グラフ画像＋ノード一覧＋FINAL、JPEG化で約4MB・0.5秒）/ 共有URL・Presence
+- [ ] Phase 6 検証・負荷/実機/投影・デプロイ（任意：/api/synthesize 要約）
 
 ## プライバシー（未成年利用 / SPEC §16）
 個人情報は収集しない。表示名（ニックネーム）のみ。認証なし。ルームは一時的。

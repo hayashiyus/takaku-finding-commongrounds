@@ -28,8 +28,18 @@ function bandPosition(node: GraphNode, indexInType: number) {
 export default function GraphCanvas() {
   const nodes = useGraphStore((s) => s.nodes);
   const edges = useGraphStore((s) => s.edges);
+  const replayStep = useGraphStore((s) => s.replayStep);
   const [selected, setSelected] = useState<string | null>(null);
   const rf = useRef<ReactFlowInstance | null>(null);
+
+  // タイムライン再生：先頭から replayStep 件のみ表示（null=全件）。位置は保持し hidden で制御。
+  const visibleIds = useMemo(
+    () =>
+      replayStep == null
+        ? null
+        : new Set(nodes.slice(0, replayStep).map((n) => n.id)),
+    [nodes, replayStep],
+  );
 
   // 近傍ハイライト用（選択ノードと、線でつながる相手）
   const neighbors = useMemo(() => {
@@ -58,6 +68,7 @@ export default function GraphCanvas() {
         id: n.id,
         type: 'thought',
         position: pos,
+        hidden: visibleIds ? !visibleIds.has(n.id) : false,
         data: {
           type: n.type,
           text: n.text,
@@ -67,7 +78,7 @@ export default function GraphCanvas() {
         },
       };
     });
-  }, [nodes, neighbors]);
+  }, [nodes, neighbors, visibleIds]);
 
   const rfEdges: Edge[] = useMemo(
     () =>
@@ -82,6 +93,9 @@ export default function GraphCanvas() {
           source: e.source_id,
           target: e.target_id,
           label: meta.jaLabel,
+          hidden: visibleIds
+            ? !(visibleIds.has(e.source_id) && visibleIds.has(e.target_id))
+            : false,
           labelStyle: { fontSize: 11, fill: meta.color, fontWeight: 700 },
           labelBgStyle: { fill: '#ffffff', fillOpacity: 0.9 },
           animated: selected ? touches : false,
@@ -93,7 +107,7 @@ export default function GraphCanvas() {
           },
         };
       }),
-    [edges, selected],
+    [edges, selected, visibleIds],
   );
 
   // ノード追加・「整える」時に自動で全体表示へ（投影で見切れない / fitView再適用）

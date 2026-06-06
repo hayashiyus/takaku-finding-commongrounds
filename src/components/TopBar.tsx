@@ -26,8 +26,8 @@ export default function TopBar({
         整える
       </button>
       <Timeline />
-      <FinalIdeaPanel />
-      <ExportPdfButton />
+      <FinalIdeaPanel roomId={roomId} />
+      <ExportPdfButton roomId={roomId} />
       <ShareButton />
       <PresenceBar />
     </div>

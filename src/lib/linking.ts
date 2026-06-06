@@ -7,9 +7,11 @@ import type {
 } from '../types';
 
 const TOPK = Number(import.meta.env.VITE_LINK_TOPK ?? 6);
-const SIM_FLOOR = Number(import.meta.env.VITE_LINK_SIM_FLOOR ?? 0.3);
 const LLM_ON =
   String(import.meta.env.VITE_FEATURE_LLM_LINKING ?? 'true') === 'true';
+const SIM_FLOOR_RAW = Number(import.meta.env.VITE_LINK_SIM_FLOOR ?? 0.3);
+// LLM有効時は候補のrecallを優先（最終判定はLLM）。fallback時はノイズ抑制のため高め閾値。
+const SIM_FLOOR = LLM_ON ? Math.min(SIM_FLOOR_RAW, 0.4) : SIM_FLOOR_RAW;
 
 export function cosine(a: number[], b: number[]): number {
   let dot = 0;

@@ -56,8 +56,11 @@ npm run build    # tsc -b && vite build
 - [x] **Phase 0** 足場（Vite+React+TS+Tailwind、schema、型、ルーティング、各種スケルトン）
 - [x] **Phase 1** リアルタイム土台（Realtime同期・Presence）— 実測 158ms / Presence確認
 - [x] **Phase 2** 端末内埋め込み（Transformers.js, multilingual-e5-small, cosine top-k）
-- [x] **Phase 3（fallback）** 類似度のみで `related` 結線。LLM型付き分類は鍵投入後（`/api/classify-links`）
-  - 知見：e5は同言語短文だと無関係でも cosine≈0.79。`VITE_LINK_SIM_FLOOR` を 0.30→0.82 に調整（要・本番調整）。絶対閾値は脆く、堅牢化はLLM分類が必須。
+- [x] **Phase 3** ハイブリッド・リンク
+  - fallback（類似度のみ `related`）✓／**LLM型付き分類**（tool use, `claude-haiku-4-5`, `api/_classify.ts` + `api/classify-links.ts` Edge + dev用 vite plugin）実装・配線済 ✓
+  - 検証：dev endpoint まで疎通（キー有効・構造化エラー確認）。**LLM出力の最終確認は Anthropic クレジット残高待ち**（console.anthropic.com → Plans & Billing）。
+  - 知見：e5は同言語短文だと無関係でも cosine≈0.79 → fallback floor を 0.82 に調整。LLMモードは recall優先（floor≤0.40）で候補化し、LLMが最終判定。
+  - コスト実測見積：Haiku 4.5（$1/$5 per MTok）で ~$0.003/node ＝ 200node で ~$0.6（数十〜数百円, §12内）。
 - [ ] Phase 4 可視化・「整える」アニメ・投影耐性（fitView再適用も対応）
 - [ ] Phase 5 タイムライン再生・FINAL IDEA・PDF
 - [ ] Phase 6 検証・負荷/実機/投影・デプロイ

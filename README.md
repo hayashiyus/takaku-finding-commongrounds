@@ -54,10 +54,11 @@ npm run build    # tsc -b && vite build
 
 ## 実装フェーズ（現況）
 - [x] **Phase 0** 足場（Vite+React+TS+Tailwind、schema、型、ルーティング、各種スケルトン）
-- [ ] **Phase 1** リアルタイム土台（Realtime同期・Presence）← 次
-- [ ] Phase 2 端末内埋め込み（Transformers.js）
-- [ ] Phase 3 ハイブリッド・リンク（/api/classify-links）
-- [ ] Phase 4 可視化・「整える」アニメ・投影耐性
+- [x] **Phase 1** リアルタイム土台（Realtime同期・Presence）— 実測 158ms / Presence確認
+- [x] **Phase 2** 端末内埋め込み（Transformers.js, multilingual-e5-small, cosine top-k）
+- [x] **Phase 3（fallback）** 類似度のみで `related` 結線。LLM型付き分類は鍵投入後（`/api/classify-links`）
+  - 知見：e5は同言語短文だと無関係でも cosine≈0.79。`VITE_LINK_SIM_FLOOR` を 0.30→0.82 に調整（要・本番調整）。絶対閾値は脆く、堅牢化はLLM分類が必須。
+- [ ] Phase 4 可視化・「整える」アニメ・投影耐性（fitView再適用も対応）
 - [ ] Phase 5 タイムライン再生・FINAL IDEA・PDF
 - [ ] Phase 6 検証・負荷/実機/投影・デプロイ
 

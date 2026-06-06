@@ -6,11 +6,13 @@ interface GraphState {
   edges: GraphEdge[];
   presence: PresenceUser[];
   myName: string;
+  embById: Record<string, number[]>; // 端末内で算出した埋め込み（Phase 2）
   setMyName: (n: string) => void;
   setNodes: (n: GraphNode[]) => void;
   setEdges: (e: GraphEdge[]) => void;
   upsertNode: (n: GraphNode) => void;
   upsertEdge: (e: GraphEdge) => void;
+  setEmbedding: (id: string, emb: number[]) => void;
   setPresence: (p: PresenceUser[]) => void;
   reset: () => void;
 }
@@ -20,6 +22,7 @@ export const useGraphStore = create<GraphState>((set) => ({
   edges: [],
   presence: [],
   myName: '',
+  embById: {},
   setMyName: (n) => set({ myName: n }),
   setNodes: (nodes) => set({ nodes }),
   setEdges: (edges) => set({ edges }),
@@ -43,6 +46,8 @@ export const useGraphStore = create<GraphState>((set) => ({
       next[i] = { ...next[i], ...e };
       return { edges: next };
     }),
+  setEmbedding: (id, emb) =>
+    set((s) => ({ embById: { ...s.embById, [id]: emb } })),
   setPresence: (presence) => set({ presence }),
-  reset: () => set({ nodes: [], edges: [], presence: [] }),
+  reset: () => set({ nodes: [], edges: [], presence: [], embById: {} }),
 }));

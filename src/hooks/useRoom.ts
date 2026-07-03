@@ -37,8 +37,9 @@ export function useRoom(roomId: string) {
       const r = (roomRow as Room) ?? { id: roomId };
       setRoom(r);
       setFinalIdea(r.final_idea ?? '');
-      setNodes((nodes as GraphNode[]) ?? []);
-      setEdges((edges as GraphEdge[]) ?? []);
+      // 取得失敗（data=null）時は既存のローカル状態を消さない（正規の空ルームは [] が返る）
+      if (nodes) setNodes(nodes as GraphNode[]);
+      if (edges) setEdges(edges as GraphEdge[]);
       setLoading(false);
     }
     void load();

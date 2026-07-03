@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import EngineStatusBar from '../components/EngineStatusBar';
 import GraphCanvas from '../components/GraphCanvas';
 import InputBar from '../components/InputBar';
 import JoinDialog from '../components/JoinDialog';
@@ -11,11 +12,12 @@ import { useRealtimeEdges } from '../hooks/useRealtimeEdges';
 import { usePresence } from '../hooks/usePresence';
 import { computeLayout } from '../lib/layout';
 import { embed, loadEmbedder } from '../lib/embeddings';
-import { classifyLinks, selectCandidates } from '../lib/linking';
+import { getLinkEngine } from '../lib/linkEngine';
+import { classifyLinksCosine, selectCandidates } from '../lib/linking';
 import { SEED_NODES } from '../lib/seed';
 import { supabase, supabaseReady } from '../lib/supabaseClient';
 import { useGraphStore } from '../store/graphStore';
-import type { GraphEdge, GraphNode, NodeType } from '../types';
+import type { GraphEdge, GraphNode, NodeType, RoomMode } from '../types';
 
 const uid = () =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -34,14 +36,46 @@ export default function Room() {
   const upsertNode = useGraphStore((s) => s.upsertNode);
   const upsertEdge = useGraphStore((s) => s.upsertEdge);
   const setEmbedding = useGraphStore((s) => s.setEmbedding);
+  const setEngineStatus = useGraphStore((s) => s.setEngineStatus);
+  const highPrecision = useGraphStore((s) => s.highPrecision);
 
   const [embReady, setEmbReady] = useState(false);
   const embeddingBusy = useRef(false);
 
-  useRoom(roomId);
+  const { room } = useRoom(roomId);
   useRealtimeNodes(roomId);
   useRealtimeEdges(roomId);
   usePresence(roomId, myName);
+
+  // ルーム単位モード（rooms.mode）。Supabase 未設定＝オフライン授業は lite。
+  // room 取得中（supabase あり）は null → エンジン未生成（createNode は cosine 安全側）。
+  const mode: RoomMode | null = !supabaseReady
+    ? 'lite'
+    : room
+      ? room.mode === 'pro'
+        ? 'pro'
+        : 'lite'
+      : null;
+
+  const engine = useMemo(
+    () => (mode ? getLinkEngine(roomId, mode, { highPrecision }) : null),
+    [roomId, mode, highPrecision],
+  );
+
+  useEffect(() => {
+    if (!engine) return;
+    const unsub = engine.onStatus((s) => {
+      setEngineStatus(s);
+      // 高精度モデルのロード失敗時はトグルを自動解除（死にスイッチ化を防ぐ。再ONで再試行可）
+      if (s.state === 'error' && s.tier === 'webllm') {
+        useGraphStore.getState().setHighPrecision(false);
+      }
+    });
+    return () => {
+      unsub();
+      setEngineStatus(null);
+    };
+  }, [engine, setEngineStatus]);
 
   // バックエンド未設定時はローカルにシードを表示（§4 シード / オフライン確認用）
   useEffect(() => {
@@ -113,7 +147,7 @@ export default function Room() {
         .insert({ id, room_id: roomId, type, text, author_name: myName });
     }
 
-    // Phase 2: 端末内で埋め込み生成（モデル未ロードなら自動でロード完了を待つ）
+    // 端末内で埋め込み生成（モデル未ロードなら自動でロード完了を待つ）
     let emb: number[];
     try {
       emb = await embed(text);
@@ -133,21 +167,30 @@ export default function Room() {
         );
     }
 
-    // Phase 3（fallback）: 候補選定（cosine top-k）→ 型付きリンク（LLM無効時は related）
+    // 候補選定（cosine top-k）→ LinkEngine（pro=クラウドLLM / lite=webllm→nli→cosine）
     const state = useGraphStore.getState();
     const all = state.nodes
       .map((n) => ({ ...n, embedding: state.embById[n.id] }))
-      .filter((n): n is GraphNode & { embedding: number[] } =>
-        Boolean(n.embedding) && n.id !== id,
+      .filter(
+        (n): n is GraphNode & { embedding: number[] } =>
+          Boolean(n.embedding) && n.id !== id,
       );
-    const candidates = selectCandidates({ ...node, embedding: emb }, all);
+    const targetWithEmb = { ...node, embedding: emb };
+    const candidates = selectCandidates(
+      targetWithEmb,
+      all,
+      engine?.candidateParams,
+    );
     const existing = new Set(
       state.edges.flatMap((e) => [
         `${e.source_id}>${e.target_id}`,
         `${e.target_id}>${e.source_id}`,
       ]),
     );
-    const proposed = await classifyLinks({ ...node, embedding: emb }, candidates);
+    // room 取得前（engine 未生成）は cosine 安全側
+    const proposed = engine
+      ? await engine.classify(targetWithEmb, candidates)
+      : classifyLinksCosine(targetWithEmb, candidates);
     for (const p of proposed) {
       if (existing.has(`${p.source_id}>${p.target_id}`)) continue;
       const edge: GraphEdge = {
@@ -200,12 +243,14 @@ export default function Room() {
       createNode,
       getState: useGraphStore.getState,
       embReady,
+      mode,
+      engineTier: engine?.tier ?? null,
     };
   }
 
   return (
     <div className="h-full flex flex-col">
-      <TopBar roomId={roomId} onTidy={tidy} />
+      <TopBar roomId={roomId} mode={mode} onTidy={tidy} />
       {!supabaseReady && (
         <div className="bg-yellow-100 text-yellow-900 font-jp text-[12px] px-4 py-1.5 border-b border-yellow-200">
           Supabase 未設定：ローカル表示（同期なし）。`takaku-app/.env.local` に URL / ANON_KEY を設定すると複数端末同期が有効になります。
@@ -215,11 +260,7 @@ export default function Room() {
         <Legend />
         <GraphCanvas />
       </div>
-      {!embReady && (
-        <div className="bg-stone-100 text-ink-soft font-jp text-[11px] px-4 py-1 border-t border-line">
-          AI（意味判定）準備中… 入力はそのまま可能です。
-        </div>
-      )}
+      {mode && <EngineStatusBar mode={mode} embReady={embReady} />}
       <InputBar onSubmit={createNode} />
     </div>
   );

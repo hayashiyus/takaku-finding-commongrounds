@@ -34,10 +34,15 @@ export interface GraphEdge {
   created_at?: string;
 }
 
+/** ルームの動作モード: pro=サーバレスLLM判定（講演デモ）/ lite=ブラウザ内AIのみ（授業） */
+export type RoomMode = 'pro' | 'lite';
+
 export interface Room {
   id: string;
   name?: string | null;
   final_idea?: string | null;
+  mode?: RoomMode;
+  llm_calls?: number;
   created_at?: string;
 }
 
@@ -57,6 +62,8 @@ export interface ClassifyCandidate {
 export interface ClassifyRequest {
   target: ClassifyCandidate;
   candidates: ClassifyCandidate[];
+  /** 呼び出し上限（quota）用。旧クライアントは未送信 → サーバは room_required を返す */
+  room_id?: string;
 }
 
 export type ClassifyRelation = Relation | 'none';
@@ -75,4 +82,6 @@ export interface ClassifyLink {
 
 export interface ClassifyResponse {
   links: ClassifyLink[];
+  /** 'quota_exceeded' | 'room_required' | その他サーバ側エラー（200で返る） */
+  error?: string;
 }

@@ -4,12 +4,36 @@
 create extension if not exists vector;
 
 -- ルーム（チーム/セッション単位）
+-- mode: 'pro'=サーバレスLLM判定（講演デモ）/ 'lite'=ブラウザ内AIのみ（授業）。
+--       デフォルト lite（URL直打ちで自動生成される部屋は LLM を使えない）。
 create table if not exists rooms (
   id           text primary key,                 -- 短いランダムID (URLに使用)
   name         text,
   final_idea   text,
+  mode         text not null default 'lite' check (mode in ('pro','lite')),
+  llm_calls    integer not null default 0,       -- pro のLLM呼び出し回数（quota用）
   created_at   timestamptz not null default now()
 );
+
+-- pro のLLM呼び出し上限: 原子的インクリメント＋上限チェック（Edge Function が service_role で呼ぶ）
+create or replace function increment_llm_calls(p_room_id text, p_max integer)
+returns boolean
+language plpgsql security definer set search_path = public
+as $$
+declare ok boolean;
+begin
+  update rooms set llm_calls = llm_calls + 1
+   where id = p_room_id and mode = 'pro' and llm_calls < p_max
+  returning true into ok;
+  return coalesce(ok, false);
+end $$;
+-- PUBLIC を含めて revoke（PostgreSQL は関数作成時に PUBLIC へ EXECUTE を既定付与するため）
+revoke execute on function increment_llm_calls(text, integer) from public, anon, authenticated;
+
+-- quota 関連列（mode / llm_calls）のクライアント改ざん防止（列レベル権限）。
+-- id は useRoom の upsert に、final_idea は FINAL IDEA パネルに必要。
+revoke update on table rooms from anon, authenticated;
+grant update (id, name, final_idea) on table rooms to anon, authenticated;
 
 -- ノード（事実/気づき/アイデア/仮説）
 create table if not exists nodes (

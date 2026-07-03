@@ -1,17 +1,15 @@
-// 候補選定（cosine top-k）＋ 型付き分類呼び出し ＋ フォールバック（SPEC §7.2/§7.3/§7.5）
-import type {
-  ClassifyRequest,
-  ClassifyResponse,
-  GraphNode,
-  Relation,
-} from '../types';
+// 候補選定（cosine top-k）と cosine 段の結線（SPEC §7.2/§7.5）
+// 型付き分類（pro LLM / lite WebLLM / lite NLI）は src/lib/linkEngine/ が担当し、
+// 本ファイルは「候補を選ぶ」「類似度だけで related を返す」純ロジックのみを持つ。
+import type { GraphNode, Relation } from '../types';
 
 const TOPK = Number(import.meta.env.VITE_LINK_TOPK ?? 6);
-const LLM_ON =
-  String(import.meta.env.VITE_FEATURE_LLM_LINKING ?? 'true') === 'true';
-const SIM_FLOOR_RAW = Number(import.meta.env.VITE_LINK_SIM_FLOOR ?? 0.3);
-// LLM有効時は候補のrecallを優先（最終判定はLLM）。fallback時はノイズ抑制のため高め閾値。
-const SIM_FLOOR = LLM_ON ? Math.min(SIM_FLOOR_RAW, 0.4) : SIM_FLOOR_RAW;
+export const TOPK_LITE = Number(import.meta.env.VITE_LINK_TOPK_LITE ?? 3);
+const SIM_FLOOR_RAW = Number(import.meta.env.VITE_LINK_SIM_FLOOR ?? 0.8);
+// 分類器（LLM/NLI）が後段で判定する場合は recall 優先（フロアを 0.4 まで下げる）。
+// cosine 単独で結線する場合はノイズ抑制のため env の高フロアをそのまま使う。
+const FLOOR_WITH_CLASSIFIER = Math.min(SIM_FLOOR_RAW, 0.4);
+export const RELATED_FLOOR = SIM_FLOOR_RAW; // neutral判定→related 降格時にも使う
 
 export function cosine(a: number[], b: number[]): number {
   let dot = 0;
@@ -31,20 +29,33 @@ export interface Candidate {
   sim: number;
 }
 
+export interface CandidateParams {
+  /** 後段に型付き分類器がいるか（true=recall優先フロア / false=高フロア） */
+  hasClassifier: boolean;
+  topk: number;
+}
+
+export const DEFAULT_CANDIDATE_PARAMS: CandidateParams = {
+  hasClassifier: false,
+  topk: TOPK,
+};
+
 /** 新規ノードと同ルーム既存ノードの cosine 上位 k 件（フロア超）。自己は除外。 */
 export function selectCandidates(
   target: GraphNode,
   all: GraphNode[],
+  params: CandidateParams = DEFAULT_CANDIDATE_PARAMS,
 ): Candidate[] {
   if (!target.embedding) return [];
+  const floor = params.hasClassifier ? FLOOR_WITH_CLASSIFIER : SIM_FLOOR_RAW;
   const scored: Candidate[] = [];
   for (const n of all) {
     if (n.id === target.id || !n.embedding) continue;
     const sim = cosine(target.embedding, n.embedding);
-    if (sim >= SIM_FLOOR) scored.push({ node: n, sim });
+    if (sim >= floor) scored.push({ node: n, sim });
   }
   scored.sort((a, b) => b.sim - a.sim);
-  return scored.slice(0, TOPK);
+  return scored.slice(0, params.topk);
 }
 
 export interface ProposedEdge {
@@ -55,54 +66,22 @@ export interface ProposedEdge {
   rationale?: string;
 }
 
-/** 候補を型付きエッジ案へ。LLM_ON=false のときは類似度フロア超を related に。 */
-export async function classifyLinks(
+/**
+ * cosine 段: RELATED_FLOOR 以上の候補のみ `related` として返す。
+ * フロアをここで課すことで、分類器の失敗・quota 降格パス（recall優先 0.4 フロアで
+ * 候補選定済み）から呼ばれても過剰結線しない（e5 の無関係≈0.79 問題対策）。
+ * 正規の cosine 段（高フロアで選定済み）ではフィルタは実質 no-op。
+ */
+export function classifyLinksCosine(
   target: GraphNode,
   candidates: Candidate[],
-): Promise<ProposedEdge[]> {
-  if (candidates.length === 0) return [];
-
-  if (!LLM_ON) {
-    return candidates.map((c) => ({
+): ProposedEdge[] {
+  return candidates
+    .filter((c) => c.sim >= RELATED_FLOOR)
+    .map((c) => ({
       source_id: target.id,
       target_id: c.node.id,
       relation: 'related' as Relation,
       confidence: c.sim,
     }));
-  }
-
-  const body: ClassifyRequest = {
-    target: { id: target.id, type: target.type, text: target.text },
-    candidates: candidates.map((c) => ({
-      id: c.node.id,
-      type: c.node.type,
-      text: c.node.text,
-    })),
-  };
-  const res = await fetch('/api/classify-links', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`classify-links failed: ${res.status}`);
-  const data = (await res.json()) as ClassifyResponse;
-
-  const edges: ProposedEdge[] = [];
-  for (const link of data.links) {
-    if (link.relation === 'none') continue;
-    let source_id = target.id;
-    let target_id = link.neighbor_id;
-    if (link.direction === 'from_neighbor_to_target') {
-      source_id = link.neighbor_id;
-      target_id = target.id;
-    }
-    edges.push({
-      source_id,
-      target_id,
-      relation: link.relation,
-      confidence: link.confidence,
-      rationale: link.rationale,
-    });
-  }
-  return edges;
 }

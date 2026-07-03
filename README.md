@@ -2,8 +2,27 @@
 
 多人数同時参加の合意形成支援ツール。参加者が「事実・気づき・アイデア・仮説」を書き込むと、AIが**意味にもとづいて関係を判定して線で結び**、ばらばらの発想を1枚の像へ統合する。
 
-- 仕様：`../SPEC.md` ／ 実装計画・フェーズ：`../PLAN.md`
-- 技術：React 18 + TypeScript + Vite / Tailwind / @xyflow/react + d3-force / Transformers.js（端末内埋め込み）/ Supabase（Realtime/Postgres/pgvector）/ Vercel Functions（型付きリンクLLM）
+- 仕様：`../SPEC.md` ／ 実装計画：`../PLAN.md` ／ **2モード拡張の詳細設計：`DESIGN.md`**
+- 技術：React 18 + TypeScript + Vite / Tailwind / @xyflow/react + d3-force / Transformers.js（端末内埋め込み・NLI）/ WebLLM（端末内LLM・オプトイン）/ Supabase（Realtime/Postgres/pgvector）/ Vercel Functions（型付きリンクLLM）
+
+## 2つのモード（ルーム作成時に選択）
+
+| | **本番LLM版（PRO）** | **簡易版（LITE）** |
+|---|---|---|
+| 想定 | 講演会の体験デモ | 高校の授業（常用） |
+| 関係判定 | クラウドAI（Claude, tool use）が**5種**を高精度判定 | ブラウザ内AIの**段階チェーン**：①高精度=端末内LLM（WebLLM/WebGPU・オプトイン ~1GB）②標準=NLI（自動 ~339MB）③類似度 |
+| 判定できる関係 | 根拠づける/対立する/具体化する/再枠組みする/関連 | ①は5種すべて／②は根拠づける・対立する・関連（**具体化・再枠組みは不可**）／③は関連のみ |
+| コスト | 少額のAPI利用（**ルーム単位上限**＋Anthropic spend limit 推奨） | **完全ゼロ**（モデルは初回DL後キャッシュ） |
+| 作り方 | Home の「本番LLM版」カード | Home の「簡易版」カード（URL直打ちで自動生成される部屋も lite） |
+
+### 授業運用のコツ（lite）
+- **前日までに生徒端末で一度ルームを開く**（NLIモデル339MBを事前キャッシュ）。
+- huggingface.co / cdn.jsdelivr.net への到達性を確認（モデル配信元）。
+- 高精度モードは WebGPU 対応端末のみ表示。教員判断でオン（~1GB）。
+
+### 講演運用のコツ（pro）
+- **Anthropic コンソールで spend limit を必ず設定**（quota はルーム単位のコスト bound であり、グローバル上限ではないため）。
+- Vercel に `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` を設定すると quota（既定400回/ルーム）が有効化。未設定なら fail-open（quota なし）で従来動作。
 
 ## セットアップ
 
@@ -14,8 +33,9 @@ npm install
 
 ### 2. Supabase（無料プロジェクト）
 1. https://supabase.com で新規プロジェクト作成。
-2. SQL Editor で `supabase/schema.sql` を実行（pgvector・RLS・Realtime publication を含む）。
-3. Project Settings → API から **Project URL** と **anon key** を取得。
+2. SQL Editor で `supabase/schema.sql` を実行（pgvector・RLS・Realtime publication・mode/quota を含む）。
+   - **既存プロジェクトを 2モード対応に更新する場合**は `supabase/migrations/002_room_mode_and_quota.sql` を実行。
+3. Project Settings → API から **Project URL** と **anon key** を取得（quota を使う場合は **service_role** も）。
 
 ### 3. 環境変数
 `.env.example` を `.env.local` にコピーし、値を設定：
@@ -23,9 +43,10 @@ npm install
 VITE_SUPABASE_URL=...           # Supabase Project URL
 VITE_SUPABASE_ANON_KEY=...      # anon key
 VITE_EMBEDDING_MODEL=Xenova/multilingual-e5-small
-VITE_FEATURE_LLM_LINKING=true   # false で類似度のみ（LLM不要・ゼロコスト）
+VITE_FEATURE_LLM_LINKING=true   # 緊急キルスイッチ。false で全モード類似度のみ（通常 true のまま）
 VITE_LINK_TOPK=6
-VITE_LINK_SIM_FLOOR=0.30
+VITE_LINK_SIM_FLOOR=0.80
+# lite（簡易版）: VITE_NLI_MODEL / VITE_NLI_THRESHOLD / VITE_WEBLLM_MODEL / VITE_LINK_TOPK_LITE（.env.example 参照）
 ```
 LLM 型付きリンク（Phase 3 以降）を使う場合は、**サーバ専用**変数を Vercel 側に設定（クライアントへ出さない）：
 ```
@@ -79,7 +100,8 @@ npm run build    # tsc -b && vite build
   - コスト実測見積：Haiku 4.5（$1/$5 per MTok）で ~$0.003/node ＝ 200node で ~$0.6（数十〜数百円, §12内）。
 - [x] **Phase 4** 可視化・体験：CSS transitionで「整える」滑らか移動、fitView再適用（追加/整える/リサイズ）、クリックで近傍ハイライト（非近傍を減光）、Legend/TopBarのレスポンシブ、1920×1080投影で可読を確認
 - [x] **Phase 5** 署名機能：タイムライン再生（追加順に出現＋スクラブ）/ FINAL IDEA（rooms.final_idea保存・is_final強調）/ PDF出力（グラフ画像＋ノード一覧＋FINAL、JPEG化で約4MB・0.5秒）/ 共有URL・Presence
-- [~] **Phase 6** 検証・デプロイ：20クライアント/100ノード負荷テスト ✅（100挿入0失敗・realtime100受信・100ノード描画）/ §12セルフレビュー ✅ / vercel.json・env手順整備 ✅ ／ **残：Vercelデプロイ実行・実機スマホ・会場NW疎通（環境依存=ユーザー側）**・LLMクレジット投入・（任意）/api/synthesize
+- [x] **Phase 6** 検証・デプロイ：20クライアント/100ノード負荷テスト ✅ / §12セルフレビュー ✅ / **Vercel本番デプロイ ✅ https://takaku-app.vercel.app** ／ 残：実機スマホ・会場NW疎通（環境依存=ユーザー側）・LLMクレジット投入・（任意）/api/synthesize
+- [x] **拡張: 2モード化（pro/lite）**：ルーム単位モード選択、LinkEngine抽象（pro=クラウドLLM / lite=WebLLM→NLI→cosine 段階チェーン）、pro呼び出し上限（quota）、Home 2カード/モードバッジ/EngineStatusBar — 詳細は `DESIGN.md`。要 `migrations/002` 適用
 
 ## プライバシー（未成年利用 / SPEC §16）
 個人情報は収集しない。表示名（ニックネーム）のみ。認証なし。ルームは一時的。

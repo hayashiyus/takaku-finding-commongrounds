@@ -10,9 +10,38 @@
       rel="stylesheet"
     />
     <title>相関図ツール TAKAKU — 合意形成支援</title>
+    <script>
+      // React マウント前のあらゆる失敗（構文エラー・読込失敗・実行時例外）を白画面ではなく可視化する
+      (function () {
+        function showError(msg) {
+          if (window.__takakuMounted) return;
+          var root = document.getElementById('root');
+          if (!root) return;
+          root.innerHTML =
+            '<div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;font-family:sans-serif;color:#333;text-align:center">' +
+            '<div style="font-weight:bold"><span style="color:#d97706">◆</span> TAKAKU</div>' +
+            '<div style="font-size:14px;font-weight:bold">読み込みに失敗しました</div>' +
+            '<div style="font-size:11px;color:#888;max-width:320px;word-break:break-all">' + String(msg).slice(0, 300) + '</div>' +
+            '<button onclick="location.reload()" style="font-size:14px;padding:10px 24px;border:1px solid #333;border-radius:9999px;background:#fff">再読み込み</button>' +
+            '<div style="font-size:11px;color:#888">改善しない場合は Safari / Chrome で開いてください</div>' +
+            '</div>';
+        }
+        window.addEventListener('error', function (e) {
+          showError(e.message || (e.target && e.target.src ? 'script load failed: ' + e.target.src : 'unknown error'));
+        }, true);
+        window.addEventListener('unhandledrejection', function (e) {
+          showError((e.reason && (e.reason.message || e.reason)) || 'unhandled rejection');
+        });
+      })();
+    </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="takaku-boot" style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;font-family:sans-serif;color:#666">
+        <div style="font-weight:bold;letter-spacing:0.1em"><span style="color:#d97706">◆</span> TAKAKU</div>
+        <div style="font-size:13px">読み込み中…</div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

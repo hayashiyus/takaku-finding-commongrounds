@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Background, Controls, MiniMap, ReactFlow } from '@xyflow/react';
+import { Background, Controls, Panel, ReactFlow } from '@xyflow/react';
 import type {
   Edge,
   Node,
@@ -9,8 +9,8 @@ import type {
 import '@xyflow/react/dist/style.css';
 import NodeCard from './NodeCard';
 import { useGraphStore } from '../store/graphStore';
-import { NODE_META, RELATION_META } from '../lib/relations';
-import type { GraphNode, NodeType } from '../types';
+import { RELATION_META, RELATION_ORDER } from '../lib/relations';
+import type { GraphNode, NodeType, Relation } from '../types';
 
 const nodeTypes = { thought: NodeCard };
 
@@ -25,12 +25,40 @@ function bandPosition(node: GraphNode, indexInType: number) {
   return { x: 80 + indexInType * 240, y: BAND_Y[node.type] };
 }
 
-export default function GraphCanvas() {
+// ズーム段階（LOD）: 遠い=俯瞰は情報を間引き、近い=精読で詳細を出す。
+export type Lod = 'low' | 'mid' | 'high';
+
+// 境界での行き来（全カード一斉切替＝点滅）を防ぐヒステリシス付きバケット
+function lodWithHysteresis(zoom: number, cur: Lod): Lod {
+  if (cur === 'low') return zoom < 0.55 ? 'low' : zoom < 0.9 ? 'mid' : 'high';
+  if (cur === 'mid') return zoom < 0.45 ? 'low' : zoom < 0.95 ? 'mid' : 'high';
+  return zoom < 0.45 ? 'low' : zoom < 0.85 ? 'mid' : 'high'; // cur === 'high'
+}
+
+export default function GraphCanvas({
+  onEditNode,
+  onDeleteNode,
+  onRelabelEdge,
+  layoutVersion,
+}: {
+  onEditNode?: (id: string, text: string, type: NodeType) => void;
+  onDeleteNode?: (id: string) => void;
+  onRelabelEdge?: (edgeId: string, relation: Relation) => void;
+  layoutVersion?: number;
+} = {}) {
   const nodes = useGraphStore((s) => s.nodes);
   const edges = useGraphStore((s) => s.edges);
+  const myId = useGraphStore((s) => s.myId);
+  const showRelated = useGraphStore((s) => s.showRelated);
   const replayStep = useGraphStore((s) => s.replayStep);
   const [selected, setSelected] = useState<string | null>(null);
+  const [edgeMenu, setEdgeMenu] = useState<string | null>(null);
+  // ズーム段階。onMove でバケット化して保持（同値 setState は React が再描画を省く＝境界跨ぎ時のみ再描画）。
+  const [lod, setLod] = useState<Lod>('high');
   const rf = useRef<ReactFlowInstance | null>(null);
+  const prevCount = useRef(0);
+  const lastUserMove = useRef(0);
+  const prevW = useRef(typeof window !== 'undefined' ? window.innerWidth : 0);
 
   // タイムライン再生：先頭から replayStep 件のみ表示（null=全件）。位置は保持し hidden で制御。
   const visibleIds = useMemo(
@@ -41,16 +69,17 @@ export default function GraphCanvas() {
     [nodes, replayStep],
   );
 
-  // 近傍ハイライト用（選択ノードと、線でつながる相手）
+  // 近傍ハイライト用（選択ノードと、線でつながる相手）。表示中のエッジのみで整合。
   const neighbors = useMemo(() => {
     if (!selected) return null;
     const set = new Set<string>([selected]);
     for (const e of edges) {
+      if (e.relation === 'related' && !showRelated) continue; // 非表示の関連線は近傍に数えない
       if (e.source_id === selected) set.add(e.target_id);
       if (e.target_id === selected) set.add(e.source_id);
     }
     return set;
-  }, [selected, edges]);
+  }, [selected, edges, showRelated]);
 
   const rfNodes: Node[] = useMemo(() => {
     const counters: Record<NodeType, number> = {
@@ -70,50 +99,94 @@ export default function GraphCanvas() {
         position: pos,
         hidden: visibleIds ? !visibleIds.has(n.id) : false,
         data: {
+          id: n.id,
           type: n.type,
           text: n.text,
           author: n.author_name,
+          createdAt: n.created_at,
           isFinal: n.is_final,
+          isMine: !!myId && n.author_id === myId,
+          selected: selected === n.id, // アプリ独自の選択状態（onNodeClick 由来）
           dimmed: neighbors ? !neighbors.has(n.id) : false,
+          replaying: replayStep != null,
+          lod, // ズーム段階（low=色チップ / mid=本文 / high=フル）
+          onEdit: onEditNode,
+          onDelete: onDeleteNode,
         },
       };
     });
-  }, [nodes, neighbors, visibleIds]);
+  }, [
+    nodes,
+    neighbors,
+    visibleIds,
+    myId,
+    selected,
+    replayStep,
+    lod,
+    onEditNode,
+    onDeleteNode,
+  ]);
 
   const rfEdges: Edge[] = useMemo(
     () =>
       edges.map((e) => {
         const meta = RELATION_META[e.relation];
+        const isRelated = e.relation === 'related';
+        const isEdgeSelected = e.id === edgeMenu;
         const touches = selected
           ? e.source_id === selected || e.target_id === selected
           : true;
         const baseOp = 0.5 + Math.min(0.5, e.confidence * 0.5);
+        // 非表示条件: タイムライン外 / 既定で「関連」線 / 選択時に無関係な線は薄く消す
+        const hiddenByTimeline = visibleIds
+          ? !(visibleIds.has(e.source_id) && visibleIds.has(e.target_id))
+          : false;
+        const hiddenByRelated = isRelated && !showRelated;
+        // ラベル過密対策: 高ズーム時、または選択エッジ（typed）のみ表示。それ以外は付けない。
+        const showLabel =
+          !isRelated && (lod === 'high' || (!!selected && touches));
+        const strokeWidth = isRelated
+          ? 0.8
+          : touches
+            ? meta.width + 0.6
+            : meta.width;
+        const opacity = selected
+          ? touches
+            ? 0.95
+            : 0.1
+          : isRelated
+            ? Math.min(0.35, baseOp)
+            : baseOp;
         return {
           id: e.id,
           source: e.source_id,
           target: e.target_id,
-          label: meta.jaLabel,
-          hidden: visibleIds
-            ? !(visibleIds.has(e.source_id) && visibleIds.has(e.target_id))
-            : false,
+          label: showLabel ? meta.jaLabel : undefined,
+          hidden: hiddenByTimeline || hiddenByRelated,
           labelStyle: { fontSize: 11, fill: meta.color, fontWeight: 700 },
           labelBgStyle: { fill: '#ffffff', fillOpacity: 0.9 },
           animated: selected ? touches : false,
           style: {
             stroke: meta.color,
-            strokeWidth: touches ? meta.width + 0.6 : meta.width,
+            // 関連線は表示時も細く。typed は選択近傍を少し太く。
+            strokeWidth: isEdgeSelected ? strokeWidth + 1 : strokeWidth,
             strokeDasharray: meta.dash,
-            opacity: selected ? (touches ? 0.95 : 0.12) : baseOp,
+            opacity: isEdgeSelected ? 1 : opacity,
           },
         };
       }),
-    [edges, selected, visibleIds],
+    [edges, selected, edgeMenu, visibleIds, showRelated, lod],
   );
 
-  // ノード追加・「整える」時に自動で全体表示へ（投影で見切れない / fitView再適用）
+  // 全体表示への自動ズームは「カードが増えた時」だけ。編集・埋め込みUPDATE・削除では動かさない。
+  // また直近8秒以内に手動でパン/ズームした端末では発火しない（閲覧中の画面を奪わない）。
   useEffect(() => {
     const inst = rf.current;
-    if (!inst) return;
+    const len = nodes.length;
+    const grew = len > prevCount.current;
+    prevCount.current = len;
+    if (!inst || !grew) return;
+    if (Date.now() - lastUserMove.current < 8000) return;
     const t = setTimeout(
       () => inst.fitView({ duration: 550, padding: 0.2, maxZoom: 1.2 }),
       320,
@@ -126,6 +199,9 @@ export default function GraphCanvas() {
     let t: ReturnType<typeof setTimeout>;
     const onResize = () => {
       clearTimeout(t);
+      const w = window.innerWidth;
+      if (Math.abs(w - prevW.current) < 80) return; // 高さのみの変化（キーボード/URLバー）は無視
+      prevW.current = w;
       t = setTimeout(
         () => rf.current?.fitView({ duration: 300, padding: 0.2, maxZoom: 1.2 }),
         150,
@@ -137,6 +213,16 @@ export default function GraphCanvas() {
       window.removeEventListener('resize', onResize);
     };
   }, []);
+
+  // 「整える」実行後は明示アクションなので必ず全体表示（手動操作ガードも無視）
+  useEffect(() => {
+    if (!layoutVersion) return;
+    const t = setTimeout(
+      () => rf.current?.fitView({ duration: 550, padding: 0.2, maxZoom: 1.2 }),
+      320,
+    );
+    return () => clearTimeout(t);
+  }, [layoutVersion]);
 
   const onNodeClick: NodeMouseHandler = useCallback((_, node) => {
     setSelected((p) => (p === node.id ? null : node.id));
@@ -151,21 +237,65 @@ export default function GraphCanvas() {
         rf.current = inst;
       }}
       onNodeClick={onNodeClick}
-      onPaneClick={() => setSelected(null)}
+      onEdgeClick={(_, edge) => setEdgeMenu(edge.id)}
+      onPaneClick={() => {
+        setSelected(null);
+        setEdgeMenu(null);
+      }}
+      onMove={(e, vp) => {
+        if (e) lastUserMove.current = Date.now();
+        setLod((cur) => lodWithHysteresis(vp.zoom, cur));
+      }}
+      deleteKeyCode={null}
       fitView
       minZoom={0.2}
       maxZoom={2}
     >
       <Background color="#e3decf" gap={28} />
-      <MiniMap
-        pannable
-        zoomable
-        nodeColor={(n) => {
-          const t = (n.data as { type?: NodeType }).type;
-          return t ? NODE_META[t].color : '#999';
-        }}
-      />
-      <Controls />
+      {/* React Flow 自身の .react-flow__controls { display:flex } と同特異度で競合するため !important 修飾が必要 */}
+      <Controls className="!hidden sm:!flex" />
+      {edgeMenu &&
+        (() => {
+          const e = edges.find((x) => x.id === edgeMenu);
+          if (!e) return null;
+          return (
+            <Panel
+              position="bottom-center"
+              className="bg-white border border-line rounded-md shadow-md px-3 py-2 flex items-center gap-1.5 flex-wrap max-w-[92vw]"
+            >
+              <span className="font-jp text-[11px] text-ink-soft whitespace-nowrap">
+                線の種類:
+              </span>
+              {RELATION_ORDER.map((r) => {
+                const m = RELATION_META[r];
+                const on = e.relation === r;
+                return (
+                  <button
+                    key={r}
+                    onClick={() => {
+                      onRelabelEdge?.(e.id, r);
+                      setEdgeMenu(null);
+                    }}
+                    className="font-jp text-[11px] font-bold rounded-full px-2.5 py-1.5 border whitespace-nowrap"
+                    style={{
+                      borderColor: m.color,
+                      background: on ? m.color : '#fff',
+                      color: on ? '#fff' : m.color,
+                    }}
+                  >
+                    {m.jaLabel}
+                  </button>
+                );
+              })}
+              <button
+                onClick={() => setEdgeMenu(null)}
+                className="font-jp text-[12px] text-ink-soft px-2 py-1.5"
+              >
+                ✕
+              </button>
+            </Panel>
+          );
+        })()}
     </ReactFlow>
   );
 }

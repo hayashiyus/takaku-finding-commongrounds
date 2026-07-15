@@ -18,9 +18,13 @@ const PREP_LABEL: Record<string, string> = {
 export default function EngineStatusBar({
   mode,
   embReady,
+  onRelink,
+  relinking,
 }: {
   mode: RoomMode;
   embReady: boolean;
+  onRelink?: () => void;
+  relinking?: boolean;
 }) {
   const status = useGraphStore((s) => s.engineStatus);
   const preparing = useGraphStore((s) => s.preparingByTier);
@@ -53,11 +57,21 @@ export default function EngineStatusBar({
 
   const showHpToggle = mode === 'lite' && webllmSupported();
 
-  if (parts.length === 0 && !showHpToggle) return null;
+  if (parts.length === 0 && !showHpToggle && !onRelink) return null;
 
   return (
     <div className="flex items-center gap-3 bg-stone-100 text-ink-soft font-jp text-[11px] px-4 py-1 border-t border-line">
       <span className="flex-1 truncate">{parts.join('　·　')}</span>
+      {onRelink && (
+        <button
+          onClick={onRelink}
+          disabled={relinking}
+          title="現在準備できている最上位のAIで、全ての線を判定し直します（手動ラベルの線は保持）"
+          className="font-jp text-[11px] font-bold border border-line rounded-full px-2.5 py-1 hover:opacity-70 disabled:opacity-50 whitespace-nowrap shrink-0"
+        >
+          {relinking ? '引き直し中…' : '線を引き直す'}
+        </button>
+      )}
       {showHpToggle && (
         <label
           className="flex items-center gap-1.5 cursor-pointer select-none whitespace-nowrap shrink-0"

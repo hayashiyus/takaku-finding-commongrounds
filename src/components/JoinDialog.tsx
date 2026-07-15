@@ -23,11 +23,11 @@ export default function JoinDialog({ onJoin }: { onJoin: (name: string) => void 
           maxLength={12}
           autoFocus
           placeholder="例：さくら"
-          className="w-full font-jp text-[15px] border border-line rounded px-3 py-2 outline-none mb-4"
+          className="w-full font-jp text-[16px] border border-line rounded px-3 py-2.5 outline-none mb-4"
         />
         <button
           onClick={join}
-          className="w-full font-jp text-[15px] font-bold rounded px-4 py-2 text-white"
+          className="w-full font-jp text-[15px] font-bold rounded px-4 py-3 min-h-11 text-white"
           style={{ background: '#2585b0' }}
         >
           参加する

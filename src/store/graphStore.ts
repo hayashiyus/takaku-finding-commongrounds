@@ -3,12 +3,49 @@ import type { EngineStatus } from '../lib/linkEngine/types';
 import type { GraphEdge, GraphNode, PresenceUser } from '../types';
 
 const HP_KEY = 'takaku_high_precision';
+const CID_KEY = 'takaku_client_id'; // 端末固有ID（自分のカード判定）。永続。
+const NAME_KEY = 'takaku_name'; // 表示名。永続すると再読込/再接続で入室ダイアログに戻らない。
+const REL_KEY = 'takaku_show_related'; // 「関連」線の表示。既定は非表示（過密対策）。永続。
+
+// アプリ内ブラウザ等では localStorage が存在してもアクセスで SecurityError を投げることがある
+function readFlag(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function loadClientId(): string {
+  try {
+    const ex = localStorage.getItem(CID_KEY);
+    if (ex) return ex;
+    const id =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `c-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
+    localStorage.setItem(CID_KEY, id);
+    return id;
+  } catch {
+    // private mode 等で localStorage 不可 → セッション内のみ有効なIDにフォールバック
+    return `c-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
+  }
+}
+
+function loadName(): string {
+  try {
+    return localStorage.getItem(NAME_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
 
 interface GraphState {
   nodes: GraphNode[];
   edges: GraphEdge[];
   presence: PresenceUser[];
   myName: string;
+  myId: string; // 端末固有ID（localStorage 永続・自分のカードの所有権判定）
   embById: Record<string, number[]>; // 端末内で算出した埋め込み（Phase 2）
   replayStep: number | null; // タイムライン再生：表示するノード数（null=全部）
   finalIdea: string; // FINAL IDEA本文
@@ -16,15 +53,20 @@ interface GraphState {
   preparingByTier: Record<string, number>; // tier -> DL進捗%（NLIとWebLLMが並行ロードしても両方表示）
   engineError: string | null; // ロード失敗した tier（'webllm' 等）
   highPrecision: boolean; // lite の高精度モード（WebLLM）オプトイン。localStorage 永続
+  showRelated: boolean; // 「関連」線を表示するか（既定 false=非表示）。localStorage 永続
   setMyName: (n: string) => void;
   setReplayStep: (n: number | null) => void;
   setFinalIdea: (s: string) => void;
   setEngineStatus: (s: EngineStatus | null) => void; // reducer: preparing/error は個別スロットへ振り分け
   setHighPrecision: (v: boolean) => void;
+  setShowRelated: (v: boolean) => void;
   setNodes: (n: GraphNode[]) => void;
   setEdges: (e: GraphEdge[]) => void;
   upsertNode: (n: GraphNode) => void;
   upsertEdge: (e: GraphEdge) => void;
+  removeNode: (id: string) => void; // ノード＋接続エッジをストアから除去（削除・リモートDELETE反映）
+  removeEdge: (id: string) => void; // エッジ1本を除去（リモートDELETE反映）
+  removeEdgesByNode: (nodeId: string) => void; // 接続エッジのみ除去（編集の線引き直し）
   setEmbedding: (id: string, emb: number[]) => void;
   setPresence: (p: PresenceUser[]) => void;
   reset: () => void;
@@ -34,16 +76,24 @@ export const useGraphStore = create<GraphState>((set) => ({
   nodes: [],
   edges: [],
   presence: [],
-  myName: '',
+  myName: loadName(),
+  myId: loadClientId(),
   embById: {},
   replayStep: null,
   finalIdea: '',
   engineStatus: null,
   preparingByTier: {},
   engineError: null,
-  highPrecision:
-    typeof localStorage !== 'undefined' && localStorage.getItem(HP_KEY) === '1',
-  setMyName: (n) => set({ myName: n }),
+  highPrecision: readFlag(HP_KEY),
+  showRelated: readFlag(REL_KEY),
+  setMyName: (n) => {
+    try {
+      localStorage.setItem(NAME_KEY, n);
+    } catch {
+      /* private mode 等 */
+    }
+    set({ myName: n });
+  },
   setReplayStep: (n) => set({ replayStep: n }),
   setFinalIdea: (s) => set({ finalIdea: s }),
   setEngineStatus: (s) =>
@@ -72,6 +122,14 @@ export const useGraphStore = create<GraphState>((set) => ({
     }
     set({ highPrecision: v });
   },
+  setShowRelated: (v) => {
+    try {
+      localStorage.setItem(REL_KEY, v ? '1' : '0');
+    } catch {
+      /* private mode 等 */
+    }
+    set({ showRelated: v });
+  },
   setNodes: (nodes) => set({ nodes }),
   setEdges: (edges) => set({ edges }),
   upsertNode: (n) =>
@@ -94,6 +152,20 @@ export const useGraphStore = create<GraphState>((set) => ({
       next[i] = { ...next[i], ...e };
       return { edges: next };
     }),
+  removeNode: (id) =>
+    set((s) => ({
+      nodes: s.nodes.filter((n) => n.id !== id),
+      // 接続エッジも同時に除去（DBのカスケード削除イベントに依存せずローカルを整合）
+      edges: s.edges.filter((e) => e.source_id !== id && e.target_id !== id),
+    })),
+  removeEdge: (id) =>
+    set((s) => ({ edges: s.edges.filter((e) => e.id !== id) })),
+  removeEdgesByNode: (nodeId) =>
+    set((s) => ({
+      edges: s.edges.filter(
+        (e) => e.source_id !== nodeId && e.target_id !== nodeId,
+      ),
+    })),
   setEmbedding: (id, emb) =>
     set((s) => ({ embById: { ...s.embById, [id]: emb } })),
   setPresence: (presence) => set({ presence }),

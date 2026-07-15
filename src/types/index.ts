@@ -15,6 +15,7 @@ export interface GraphNode {
   type: NodeType;
   text: string;
   author_name: string;
+  author_id?: string | null; // 端末固有ID（自分のカードの編集/削除の所有権判定。旧行はnull）
   embedding?: number[] | null;
   x?: number | null;
   y?: number | null;

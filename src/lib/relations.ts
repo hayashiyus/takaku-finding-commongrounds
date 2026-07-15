@@ -3,12 +3,32 @@ import type { NodeType, Relation } from '../types';
 // ノード型のメタ（SPEC §8.2：FACT黒系/INSIGHT黄緑/IDEA青/HYPOTHESIS赤）
 export const NODE_META: Record<
   NodeType,
-  { jaLabel: string; color: string; bg: string }
+  { jaLabel: string; color: string; bg: string; example: string }
 > = {
-  fact: { jaLabel: '事実', color: '#1a1a20', bg: '#ffffff' },
-  insight: { jaLabel: '気づき', color: '#5f9e2f', bg: '#ffffff' },
-  idea: { jaLabel: 'アイディア', color: '#2585b0', bg: '#ffffff' },
-  hypothesis: { jaLabel: '仮説', color: '#cc2b2b', bg: '#ffffff' },
+  fact: {
+    jaLabel: '事実',
+    color: '#1a1a20',
+    bg: '#ffffff',
+    example: '例：再生紙は水にぬれると破れやすい',
+  },
+  insight: {
+    jaLabel: '気づき',
+    color: '#5f9e2f',
+    bg: '#ffffff',
+    example: '例：水への弱さが、屋外での使いみちを狭めている',
+  },
+  idea: {
+    jaLabel: 'アイディア',
+    color: '#2585b0',
+    bg: '#ffffff',
+    example: '例：防水加工した再生紙でアウトドア用メモ帳を作る',
+  },
+  hypothesis: {
+    jaLabel: '仮説',
+    color: '#cc2b2b',
+    bg: '#ffffff',
+    example: '例：防水にすれば屋外イベントで売れるのではないか',
+  },
 };
 
 export const NODE_TYPE_ORDER: NodeType[] = [

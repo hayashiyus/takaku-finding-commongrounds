@@ -20,8 +20,8 @@ export default function InputBar({
   };
 
   return (
-    <div className="border-t border-line bg-white/90 px-4 py-3">
-      <div className="flex gap-2 mb-2 flex-wrap">
+    <div className="border-t border-line bg-white/90 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] rounded-t-2xl shadow-[0_-4px_12px_rgba(0,0,0,0.06)] sm:rounded-none sm:shadow-none sm:pb-3">
+      <div className="flex gap-2 mb-2 flex-nowrap overflow-x-auto sm:flex-wrap sm:overflow-visible">
         {NODE_TYPE_ORDER.map((k) => {
           const meta = NODE_META[k];
           const on = k === type;
@@ -29,7 +29,7 @@ export default function InputBar({
             <button
               key={k}
               onClick={() => setType(k)}
-              className="font-jp text-[13px] font-bold rounded-full px-3 py-1 border-[1.5px]"
+              className="font-jp text-[13px] font-bold rounded-full px-3 py-2 sm:py-1 border-[1.5px] whitespace-nowrap shrink-0"
               style={{
                 borderColor: meta.color,
                 background: on ? meta.color : '#fff',
@@ -41,6 +41,9 @@ export default function InputBar({
           );
         })}
       </div>
+      <p className="font-jp text-[10px] text-ink-soft mb-1">
+        単語より「一文」で書くと、AIが関係（根拠・対立など）を見つけやすくなります
+      </p>
       <div className="flex gap-2">
         <input
           value={text}
@@ -48,13 +51,13 @@ export default function InputBar({
           onKeyDown={(e) => {
             if (e.key === 'Enter') submit();
           }}
-          placeholder={`${NODE_META[type].jaLabel}を入力して送信`}
-          className="flex-1 font-jp text-[15px] border border-line rounded px-3 py-2 outline-none"
+          placeholder={NODE_META[type].example}
+          className="flex-1 font-jp text-[16px] sm:text-[15px] border border-line rounded px-3 py-2.5 sm:py-2 outline-none"
         />
         <button
           onClick={submit}
           disabled={disabled}
-          className="font-jp text-[14px] font-bold rounded px-5 py-2 text-white disabled:opacity-50"
+          className="font-jp text-[14px] font-bold rounded px-5 min-h-11 sm:min-h-0 py-2.5 sm:py-2 whitespace-nowrap text-white disabled:opacity-50"
           style={{ background: '#2585b0' }}
         >
           送信 →

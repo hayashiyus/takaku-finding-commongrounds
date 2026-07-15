@@ -1,107 +1,213 @@
-# 相関図ツール TAKAKU（本番版 / 7-21納品）
+# TAKAKU — 多角的思考のキャンバス
 
-多人数同時参加の合意形成支援ツール。参加者が「事実・気づき・アイデア・仮説」を書き込むと、AIが**意味にもとづいて関係を判定して線で結び**、ばらばらの発想を1枚の像へ統合する。
+**みんなの「事実・気づき・アイディア・仮説」を、AIが“意味”で結んで1枚の相関図にする合意形成ツール。**
 
-- 仕様：`../SPEC.md` ／ 実装計画：`../PLAN.md` ／ **2モード拡張の詳細設計：`DESIGN.md`**
-- 技術：React 18 + TypeScript + Vite / Tailwind / @xyflow/react + d3-force / Transformers.js（端末内埋め込み・NLI）/ WebLLM（端末内LLM・オプトイン）/ Supabase（Realtime/Postgres/pgvector）/ Vercel Functions（型付きリンクLLM）
+🌐 本番アプリ： **https://takaku-app.vercel.app**
 
-## 2つのモード（ルーム作成時に選択）
+付箋会議では「同じ言葉」でしか繋げられません。TAKAKUは AI が文章の**意味**を読んで、「根拠づける」「対立する」「具体化する」「再枠組みする」という**関係の種類つきの線**を自動で引きます。誰の意見も消さずに、ばらばらの発想がひとつの像に育っていきます。
 
-| | **本番LLM版（PRO）** | **簡易版（LITE）** |
+| | 本番LLM版（PRO） | 簡易版（LITE） |
 |---|---|---|
-| 想定 | 講演会の体験デモ | 高校の授業（常用） |
-| 関係判定 | クラウドAI（Claude, tool use）が**5種**を高精度判定 | ブラウザ内AIの**段階チェーン**：①高精度=端末内LLM（WebLLM/WebGPU・オプトイン ~1GB）②標準=NLI（自動 ~339MB）③類似度 |
-| 判定できる関係 | 根拠づける/対立する/具体化する/再枠組みする/関連 | ①は5種すべて／②は根拠づける・対立する・関連（**具体化・再枠組みは不可**）／③は関連のみ |
-| コスト | 少額のAPI利用（**ルーム単位上限**＋Anthropic spend limit 推奨） | **完全ゼロ**（モデルは初回DL後キャッシュ） |
-| 作り方 | Home の「本番LLM版」カード | Home の「簡易版」カード（URL直打ちで自動生成される部屋も lite） |
+| 想定 | 講演会・イベントの体験デモ | 学校の授業（常用） |
+| 関係判定 | クラウドAI（Claude）が5種を高精度判定 | ブラウザ内AIの段階チェーン（①端末内LLM＝オプトイン ②NLI＝自動 ③類似度） |
+| コスト | 少額のAPI利用 | **完全ゼロ**（モデルは初回DL後キャッシュ） |
 
-### 授業運用のコツ（lite）
-- **前日までに生徒端末で一度ルームを開く**（NLIモデル339MBを事前キャッシュ）。
-- huggingface.co / cdn.jsdelivr.net への到達性を確認（モデル配信元）。
-- 高精度モードは WebGPU 対応端末のみ表示。教員判断でオン（~1GB）。
+- 技術：React 18 + TypeScript + Vite / Tailwind / @xyflow/react + d3-force + elkjs / Transformers.js（端末内埋め込み・NLI）/ WebLLM（端末内LLM）/ Supabase（Realtime・Postgres・pgvector）/ Vercel Functions
+- 2モード設計の詳細：[`DESIGN.md`](DESIGN.md)
+- 個人情報は収集しません（表示名＝ニックネームのみ・認証なし・未成年利用を想定した設計）
 
-### 講演運用のコツ（pro）
-- **Anthropic コンソールで spend limit を必ず設定**（quota はルーム単位のコスト bound であり、グローバル上限ではないため）。
-- Vercel に `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` を設定すると quota（既定400回/ルーム）が有効化。未設定なら fail-open（quota なし）で従来動作。
+---
 
-## セットアップ
+# 第1部 本番デプロイ手順（詳細）
 
-### 1. 依存
+ゼロから https://takaku-app.vercel.app 相当の本番環境を作る手順です。所要 約30分。
+
+## 0. 必要なもの
+
+| サービス | 用途 | 費用 |
+|---|---|---|
+| [GitHub](https://github.com) | このリポジトリの取得 | 無料 |
+| [Supabase](https://supabase.com) | データベース＋リアルタイム同期 | 無料枠でOK（同時200接続・100msg/秒） |
+| [Vercel](https://vercel.com) | ホスティング＋サーバレス関数 | 無料枠でOK |
+| [Anthropic](https://console.anthropic.com) | PRO版のクラウドAI判定 | **任意**（LITE運用なら不要。実測 ~$0.003/カード） |
+| Node.js 20+ / npm | ローカルビルド | 無料 |
+
+## 1. リポジトリ取得と依存インストール
+
 ```bash
+git clone https://github.com/hayashiyus/takaku-finding-commongrounds.git
+cd takaku-finding-commongrounds
 npm install
 ```
 
-### 2. Supabase（無料プロジェクト）
-1. https://supabase.com で新規プロジェクト作成。
-2. SQL Editor で `supabase/schema.sql` を実行（pgvector・RLS・Realtime publication・mode/quota を含む）。
-   - **既存プロジェクトを 2モード対応に更新する場合**は `supabase/migrations/002_room_mode_and_quota.sql` を実行。
-3. Project Settings → API から **Project URL** と **anon key** を取得（quota を使う場合は **service_role** も）。
+## 2. Supabase のセットアップ（DB・リアルタイム）
 
-### 3. 環境変数
-`.env.example` を `.env.local` にコピーし、値を設定：
-```
-VITE_SUPABASE_URL=...           # Supabase Project URL
-VITE_SUPABASE_ANON_KEY=...      # anon key
-VITE_EMBEDDING_MODEL=Xenova/multilingual-e5-small
-VITE_FEATURE_LLM_LINKING=true   # 緊急キルスイッチ。false で全モード類似度のみ（通常 true のまま）
-VITE_LINK_TOPK=6
-VITE_LINK_SIM_FLOOR=0.80
-# lite（簡易版）: VITE_NLI_MODEL / VITE_NLI_THRESHOLD / VITE_WEBLLM_MODEL / VITE_LINK_TOPK_LITE（.env.example 参照）
-```
-LLM 型付きリンク（Phase 3 以降）を使う場合は、**サーバ専用**変数を Vercel 側に設定（クライアントへ出さない）：
-```
-LLM_PROVIDER=anthropic
-LLM_MODEL=claude-haiku-4-5      # 実装時に公式ドキュメントで最新名/料金を確認
-LLM_API_KEY=...
-LINK_CONFIDENCE_THRESHOLD=0.6
-```
+1. https://supabase.com → **New project**（リージョンは Tokyo 推奨）。
+2. 左メニュー **SQL Editor** で、次の順に実行：
+   1. [`supabase/schema.sql`](supabase/schema.sql) — テーブル（rooms/nodes/edges）・pgvector・RLS・Realtime publication・mode/quota 一式
+   2. [`supabase/migrations/002_room_mode_and_quota.sql`](supabase/migrations/002_room_mode_and_quota.sql) — ※schema.sql を新規実行した場合は既に含まれるが、**冪等なので実行して害なし**（既存DBの更新時は必須）
+   3. [`supabase/migrations/003_node_author_and_edit.sql`](supabase/migrations/003_node_author_and_edit.sql) — **カードの編集・削除機能に必須**（`nodes.author_id` 列）
+3. **Project Settings → API** から以下を控える：
+   - **Project URL**（`https://xxxx.supabase.co`）
+   - **anon key**（クライアント公開用・RLSで保護）
+   - （quota を使う場合のみ）**service_role key**（絶対にクライアントへ出さない）
 
-## 開発
+## 3. ローカル動作確認
+
 ```bash
-npm run dev      # http://localhost:5173
+cp .env.example .env.local
+# .env.local を編集:
+#   VITE_SUPABASE_URL=（手順2のProject URL）
+#   VITE_SUPABASE_ANON_KEY=（anon key）
+npm run dev   # http://localhost:5173
 ```
-> Supabase 未設定でも起動し、ローカルにシード（再生厚紙テーマ）を表示します（同期なし）。`.env.local` 設定後に複数端末同期が有効になります。
 
-## ビルド / 型チェック
+- 2つのブラウザタブで同じルームを開き、片方でカードを追加→**もう片方に即時に現れれば同期OK**。
+- Supabase未設定でも起動します（ローカル表示のみ・同期なし）。
+
+## 4. Vercel 本番デプロイ
+
 ```bash
-npm run build    # tsc -b && vite build
+npm i -g vercel
+vercel login
+vercel          # 初回: プロジェクト作成（Framework: Vite を自動検出 / Output: dist）
 ```
 
-## デプロイ（サーバ運用なし / SPEC §14）
-1. このディレクトリ（`takaku-app/`）を Vercel に Import。**Root Directory に `takaku-app` を指定**（Framework: Vite を自動検出。Build `vite build` / Output `dist`）。
-2. **環境変数を設定**（下表）。`VITE_*` はクライアント公開可、それ以外はサーバ専用（クライアントへ出さない）。
-3. Deploy。`api/*.ts` は自動で関数化。`vercel.json` の rewrite で `/r/:roomId` 直リンクも index.html へ。
-4. 発行URLを2端末（PC＋実機スマホ）で開き、SPEC §12 の受け入れ基準を確認。**本番前に会場ネットワークで WebSocket 疎通を必ず確認**。
+**Vercel ダッシュボード → Settings → Environment Variables** に以下を設定：
 
-### 本番 環境変数チェックリスト
-| 変数 | 例 / 値 | 公開 |
+| 変数 | 値 | 種別 |
 |---|---|---|
-| `VITE_SUPABASE_URL` | https://xxx.supabase.co | クライアント |
-| `VITE_SUPABASE_ANON_KEY` | sb_publishable_... | クライアント |
-| `VITE_EMBEDDING_MODEL` | Xenova/multilingual-e5-small | クライアント |
-| `VITE_FEATURE_LLM_LINKING` | `true`（LLM型付き）/ `false`（類似度のみ） | クライアント |
-| `VITE_LINK_TOPK` | 6 | クライアント |
-| `VITE_LINK_SIM_FLOOR` | 0.80（LLM時は内部で≤0.40に） | クライアント |
-| `LLM_PROVIDER` | anthropic | **サーバ専用** |
-| `LLM_MODEL` | claude-haiku-4-5 | **サーバ専用** |
-| `LLM_API_KEY` | sk-ant-... | **サーバ専用** |
-| `LINK_CONFIDENCE_THRESHOLD` | 0.6 | **サーバ専用** |
+| `VITE_SUPABASE_URL` | `https://xxxx.supabase.co` | クライアント公開 |
+| `VITE_SUPABASE_ANON_KEY` | anon key | クライアント公開 |
+| `VITE_FEATURE_LLM_LINKING` | `true` （**必須**。falseにするとLITEのNLIまで無効化される緊急キルスイッチ） | クライアント公開 |
+| `VITE_EMBEDDING_MODEL` | `Xenova/multilingual-e5-small` | クライアント公開 |
+| `VITE_LINK_TOPK` / `VITE_LINK_SIM_FLOOR` | `6` / `0.80` | クライアント公開 |
+| `LLM_PROVIDER` / `LLM_MODEL` | `anthropic` / `claude-haiku-4-5` | **サーバ専用**（PRO版のみ） |
+| `LLM_API_KEY` | Anthropic APIキー | **サーバ専用**（PRO版のみ） |
+| `LINK_CONFIDENCE_THRESHOLD` | `0.6` | サーバ専用（PRO版のみ） |
+| `LLM_MAX_CALLS_PER_ROOM` | `400` | サーバ専用（任意・quota） |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | 手順2の値 | サーバ専用（任意・quota有効化。未設定なら quota なしで動作） |
 
-> LLM型付き分類を使うには **Anthropic アカウントにクレジットが必要**（実測見積 200ノードで ~$0.6）。未設定/残高無しでも `VITE_FEATURE_LLM_LINKING=false` で類似度fallback動作。
+その他の調整変数（NLIしきい値・WebLLMモデル等）は [`.env.example`](.env.example) を参照。
 
-## 実装フェーズ（現況）
-- [x] **Phase 0** 足場（Vite+React+TS+Tailwind、schema、型、ルーティング、各種スケルトン）
-- [x] **Phase 1** リアルタイム土台（Realtime同期・Presence）— 実測 158ms / Presence確認
-- [x] **Phase 2** 端末内埋め込み（Transformers.js, multilingual-e5-small, cosine top-k）
-- [x] **Phase 3** ハイブリッド・リンク
-  - fallback（類似度のみ `related`）✓／**LLM型付き分類**（tool use, `claude-haiku-4-5`, `api/_classify.ts` + `api/classify-links.ts` Edge + dev用 vite plugin）実装・配線済 ✓
-  - 検証：dev endpoint まで疎通（キー有効・構造化エラー確認）。**LLM出力の最終確認は Anthropic クレジット残高待ち**（console.anthropic.com → Plans & Billing）。
-  - 知見：e5は同言語短文だと無関係でも cosine≈0.79 → fallback floor を 0.82 に調整。LLMモードは recall優先（floor≤0.40）で候補化し、LLMが最終判定。
-  - コスト実測見積：Haiku 4.5（$1/$5 per MTok）で ~$0.003/node ＝ 200node で ~$0.6（数十〜数百円, §12内）。
-- [x] **Phase 4** 可視化・体験：CSS transitionで「整える」滑らか移動、fitView再適用（追加/整える/リサイズ）、クリックで近傍ハイライト（非近傍を減光）、Legend/TopBarのレスポンシブ、1920×1080投影で可読を確認
-- [x] **Phase 5** 署名機能：タイムライン再生（追加順に出現＋スクラブ）/ FINAL IDEA（rooms.final_idea保存・is_final強調）/ PDF出力（グラフ画像＋ノード一覧＋FINAL、JPEG化で約4MB・0.5秒）/ 共有URL・Presence
-- [x] **Phase 6** 検証・デプロイ：20クライアント/100ノード負荷テスト ✅ / §12セルフレビュー ✅ / **Vercel本番デプロイ ✅ https://takaku-app.vercel.app** ／ 残：実機スマホ・会場NW疎通（環境依存=ユーザー側）・LLMクレジット投入・（任意）/api/synthesize
-- [x] **拡張: 2モード化（pro/lite）**：ルーム単位モード選択、LinkEngine抽象（pro=クラウドLLM / lite=WebLLM→NLI→cosine 段階チェーン）、pro呼び出し上限（quota）、Home 2カード/モードバッジ/EngineStatusBar — 詳細は `DESIGN.md`。要 `migrations/002` 適用
+```bash
+vercel --prod   # 本番デプロイ
+```
 
-## プライバシー（未成年利用 / SPEC §16）
-個人情報は収集しない。表示名（ニックネーム）のみ。認証なし。ルームは一時的。
+## 5. デプロイ後チェックリスト
+
+- [ ] 発行URLを開き、ホームから「簡易版」ルームを作成できる
+- [ ] `https://<あなたのURL>/r/test123` の**直リンクでも**アプリが開く（SPAリライト確認）
+- [ ] PC+スマホの2端末で同じルームを開き、カード追加が**双方向に即時同期**される
+- [ ] カード2枚（例:「再生厚紙は水にぬれると破れやすい」「再生厚紙は水にぬれると簡単に破れてしまう」）で**緑の「根拠づける」線**が出る（ステータスバーが「軽量分類（端末内NLI）」になってから入力）
+- [ ] 自分のカードをタップ→「✎ 編集」「🗑 削除」が出る（**出ない場合は migration 003 未適用**）
+- [ ] 「PDF出力」で印刷ビューが開き、時系列のカード一覧が表示される
+- [ ] （PRO利用時）PROルームで4種の型付き線が出る（出ずに全部「関連」なら Anthropic クレジット残高を確認）
+
+## 6. 運用の注意（実運用で得た知見）
+
+- **PRO版を使う場合は Anthropic コンソールで spend limit を必ず設定**（ルーム単位quotaはコスト上限であってグローバル上限ではない）。
+- **授業の前日までに生徒端末で一度ルームを開いておく**（LITEのAIモデル約339MBが端末にキャッシュされ、当日は数十秒で準備完了）。huggingface.co / cdn.jsdelivr.net への到達性を学校ネットワークで確認。
+- **リンクは Safari / Chrome で開く案内を**。LINE・Messenger等のアプリ内ブラウザでも動作するが、名前の保存やモデルキャッシュが制限される。
+- **大人数（100名超）の例会は「入力代表制」を推奨**：入力は各班の書記12〜15端末のみ、他は口頭参加＋会場スクリーン投影（1接続）。全員が同時入力するとリアルタイム配信が無料枠上限（100msg/秒）を超える。
+- モデル配信・NLIしきい値など詳細設計は [`DESIGN.md`](DESIGN.md)。
+
+---
+
+# 第2部 使い方ガイド 〜はじめての人へ〜
+
+> 🎒 **このガイドは、スマホがあれば誰でも読めるように書いています。** むずかしい言葉は出てきません。5分で読めます。
+
+## TAKAKUってなに？（30秒版）
+
+みんなで意見を出し合うとき、ふせん紙だと「貼って終わり」になりがち。TAKAKUでは、あなたがスマホから一言書くと——
+
+1. **カードになって全員の画面にすぐ現れる**（教室のスクリーンにも！）
+2. **AIがカード同士の“意味”を読んで、関係を線で結ぶ**
+3. 気づいたら、みんなの意見が**1枚の大きな地図**になっている
+
+「自分の意見が誰かの意見と繋がる瞬間」が見える。それがTAKAKUです。
+
+## はじめかた（3ステップ・30秒）
+
+1. 先生や進行役から送られた**リンクを開く**（📱 SafariかChromeで開くのがおすすめ）
+2. **ニックネームを入れる**（本名じゃなくてOK。登録・パスワード一切なし）
+3. 画面下の入力欄に**思ったことを一文**書いて「送信→」。以上！
+
+## 4色のカードを使い分けよう
+
+書く前に、画面下の4つのボタンで「これはどの種類？」を選びます。**選ぶこと自体が考える練習**です。
+
+| ボタン | いつ使う？ | 例 |
+|---|---|---|
+| ⬛ **事実** | 見たこと・確かめられること | 「再生厚紙は水にぬれると破れやすい」 |
+| 🟩 **気づき** | 事実から自分が感じ取ったこと | 「水への弱さが、屋外での使いみちを狭めている」 |
+| 🟦 **アイディア** | やってみたい具体的な案 | 「防水加工した再生紙でアウトドア用メモ帳を作る」 |
+| 🟥 **仮説** | 「もしかして〜では？」という予想 | 「防水にすれば屋外イベントで売れるのではないか」 |
+
+## ✨ いちばん大事なコツ：「単語」より「一文」
+
+AIは**文章の意味**を読みます。だから——
+
+- ❌ 「椅子」「防水」「エコ」 ← 単語だけだと、AIは関係を見つけられない
+- ⭕ 「紙の椅子は意外と体重に耐えられる」 ← **主張のある一文**だと、AIがビシッと線を引ける
+
+迷ったら入力欄のうすい例文（種類を切り替えると変わります）をまねしてみてください。
+
+## 線の意味（ここがTAKAKUの心臓部！）
+
+カードとカードの間に、AIがこんな線を引きます：
+
+| 線 | 意味 | こうなると出やすい |
+|---|---|---|
+| 🟢 実線 | **根拠づける** | あるカードが別のカードの裏づけになっている |
+| 🔴 破線 | **対立する** | 2枚のカードの主張がぶつかっている（**対立は宝物！** 新しい発想の入り口） |
+| ⚫ 実線 | **具体化する** | ふわっとした話を具体的にしている |
+| 🟣 点線 | **再枠組みする** | 同じことを全く別の視点から見直している |
+| ⬜ 細線 | 関連 | なんとなく近い（ふだんは非表示。左上の「関連線を表示」でON） |
+
+> 💡 画面下に「関係判定: 軽量分類（端末内NLI）」と出てから書き始めると、線がきれいに出ます（最初の1〜2分はAIの準備中）。もし線が全部「関連」になっちゃったら、準備完了後に「**線を引き直す**」ボタンを1回押せば大丈夫。
+
+## 🎮 練習ミッション（5分でTAKAKUマスター）
+
+友だちと2人以上で、この順に入力してみよう（1人でも全部入れればOK）：
+
+1. ⬛事実「再生厚紙は水にぬれると破れやすい」
+2. 🟩気づき「再生厚紙は水にぬれると簡単に破れてしまう」 → **🟢緑の線**が出た？
+3. 🟥仮説「再生厚紙は水にぬれても破れにくいはずだ」 → **🔴赤い線**（対立）が出た？
+4. ⬛事実「高校生はメモを紙ではなくスマホでとることが多い」
+5. 🟦アイディア「スマホに貼ってはがせる再生紙のふせんを作る」
+
+線が出たら、線を**タップ**してみよう。「この関係、ほんとは“再枠組み”じゃない？」と思ったら、**人間が線の種類を変えられます**。AIと人間の共同作業です。
+
+## 画面の使い方（スマホ）
+
+- **カードをタップ** → 詳しい情報（書いた人・時刻）が見える。つながっているカードだけが明るくなる
+- **自分のカードをタップ** → 「✎ 編集」「🗑 削除」が出る（**自分のカードだけ**。人のは消せないから安心）。編集すると AI が線を引き直してくれる
+- **ピンチ（2本指）** → ズーム。引くと全体の形が見える・寄ると1枚ずつ読める
+- **メニュー ▾** → 「整える」（カードを種類ごとにきれいに整列）・「▶ 再生」（議論をはじめから再生）・「PDF出力」・「共有」
+- **● N ONLINE ▾** → いま参加している人の一覧
+
+## 仕上げ：「ひとつの像」をつくる
+
+議論が育ったら、**★ FINAL IDEA** を開いて、みんなの結論を文章にまとめ、核になったカードに★をつけます。最後に「**PDF出力**」→「PDFとして保存」で、**今日の思考の軌跡が時系列の記録**として残ります（考えた順番ごと、全部）。
+
+## こまったときは？
+
+| 症状 | 解決 |
+|---|---|
+| 画面が真っ白 | Safari か Chrome で開き直す（LINEやMessengerの中のブラウザは制限が多い） |
+| 線が全部「関連」 | AIの準備完了（画面下の表示）を待ってから「線を引き直す」を1回 |
+| 間違えて送信した | 自分のカードをタップ →「🗑 削除」または「✎ 編集」 |
+| 画面がごちゃごちゃ | メニュー →「整える」。それでも多ければ左上「関連線を表示」をOFF |
+| 入室画面に戻された | もう一度同じニックネームで入ればOK（普通は自動で戻ります） |
+
+---
+
+## クレジット
+
+金沢青年会議所「考え、動く人プロジェクト」のために開発。多様な視点を、意味でひとつの像に。
+
+## ライセンス
+
+MIT License

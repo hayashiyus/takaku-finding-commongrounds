@@ -32,6 +32,25 @@ function escapeHtml(s: string): string {
   );
 }
 
+function formatCreatedAt(iso?: string): string {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return date
+    .toLocaleString('ja-JP', {
+      month: 'numeric',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+    .replace(',', '')
+    .replace(/\s+/g, ' ')
+    .replace(/^0(\d)\//, '$1/')
+    .replace(/\/0(\d)(?=\s)/, '/$1')
+    .replace(/\s24:/, ' 00:')
+    .replace(/\s(\d):/, ' 0$1:');
+}
+
 function buildListEl(nodes: GraphNode[], finalIdea: string | null): HTMLElement {
   const el = document.createElement('div');
   el.style.cssText =
@@ -39,17 +58,39 @@ function buildListEl(nodes: GraphNode[], finalIdea: string | null): HTMLElement 
   const final = finalIdea
     ? `<div style="border:2px solid #d97706;border-radius:8px;padding:12px;margin-bottom:16px;"><div style="font-size:12px;color:#d97706;font-weight:700;">★ FINAL IDEA（ひとつの像）</div><div style="font-size:16px;font-weight:700;margin-top:4px;">${escapeHtml(finalIdea)}</div></div>`
     : '';
-  const rows = nodes
+  const sortedNodes = [...nodes].sort((a, b) => {
+    const aHasSeq = a.seq !== undefined;
+    const bHasSeq = b.seq !== undefined;
+    if (aHasSeq && bHasSeq) return a.seq! - b.seq!;
+    if (aHasSeq) return -1;
+    if (bHasSeq) return 1;
+
+    const aCreatedAt = a.created_at
+      ? new Date(a.created_at).getTime()
+      : Number.NaN;
+    const bCreatedAt = b.created_at
+      ? new Date(b.created_at).getTime()
+      : Number.NaN;
+    const aHasCreatedAt = !Number.isNaN(aCreatedAt);
+    const bHasCreatedAt = !Number.isNaN(bCreatedAt);
+    if (aHasCreatedAt && bHasCreatedAt) return aCreatedAt - bCreatedAt;
+    if (aHasCreatedAt) return -1;
+    if (bHasCreatedAt) return 1;
+    return 0;
+  });
+  const rows = sortedNodes
     .map((n) => {
       const m = NODE_META[n.type];
+      const timestamp = formatCreatedAt(n.created_at);
       return `<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid #eee;">
         <span style="flex:none;font-size:10px;font-weight:700;color:#fff;background:${m.color};border-radius:3px;padding:2px 6px;">${m.jaLabel}</span>
+        ${timestamp ? `<span style="flex:none;font-size:10px;color:#888;white-space:nowrap;">${timestamp}</span>` : ''}
         <span style="flex:1;font-size:13px;">${escapeHtml(n.text)}</span>
         <span style="flex:none;font-size:11px;color:#888;">— ${escapeHtml(n.author_name)}</span>
       </div>`;
     })
     .join('');
-  el.innerHTML = `<div style="font-size:18px;font-weight:700;margin-bottom:12px;">相関図ツール TAKAKU — 記録</div>${final}<div style="font-size:13px;font-weight:700;margin-bottom:6px;">ノード一覧（${nodes.length}件）</div>${rows}`;
+  el.innerHTML = `<div style="font-size:18px;font-weight:700;margin-bottom:12px;">相関図ツール TAKAKU — 記録</div>${final}<div style="font-size:13px;font-weight:700;margin-bottom:6px;">ノード一覧（${nodes.length}件）（時系列）</div>${rows}`;
   return el;
 }
 

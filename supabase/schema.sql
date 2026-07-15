@@ -42,6 +42,7 @@ create table if not exists nodes (
   type         text not null check (type in ('fact','insight','idea','hypothesis')),
   text         text not null,
   author_name  text not null,
+  author_id    text,                              -- 端末固有ID（自分のカードの編集/削除の所有権判定・クライアント申告値）
   embedding    vector(384),                       -- 埋め込みモデルの次元に合わせる
   x            double precision,
   y            double precision,

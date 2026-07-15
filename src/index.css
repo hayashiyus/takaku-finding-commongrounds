@@ -33,3 +33,6 @@ body {
     transform 0.55s cubic-bezier(0.4, 0, 0.2, 1),
     opacity 0.3s ease;
 }
+
+/* タッチ操作の定石: ダブルタップズームの300ms遅延と誤ズームを抑止しつつ、ピンチ等のアクセシビリティは維持 */
+body { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }

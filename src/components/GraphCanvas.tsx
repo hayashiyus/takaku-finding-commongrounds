@@ -48,7 +48,6 @@ export default function GraphCanvas({
 } = {}) {
   const nodes = useGraphStore((s) => s.nodes);
   const edges = useGraphStore((s) => s.edges);
-  const myId = useGraphStore((s) => s.myId);
   const showRelated = useGraphStore((s) => s.showRelated);
   const replayStep = useGraphStore((s) => s.replayStep);
   const [selected, setSelected] = useState<string | null>(null);
@@ -105,7 +104,6 @@ export default function GraphCanvas({
           author: n.author_name,
           createdAt: n.created_at,
           isFinal: n.is_final,
-          isMine: !!myId && n.author_id === myId,
           selected: selected === n.id, // アプリ独自の選択状態（onNodeClick 由来）
           dimmed: neighbors ? !neighbors.has(n.id) : false,
           replaying: replayStep != null,
@@ -119,7 +117,6 @@ export default function GraphCanvas({
     nodes,
     neighbors,
     visibleIds,
-    myId,
     selected,
     replayStep,
     lod,

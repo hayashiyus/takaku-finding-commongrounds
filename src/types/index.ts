@@ -15,7 +15,7 @@ export interface GraphNode {
   type: NodeType;
   text: string;
   author_name: string;
-  author_id?: string | null; // 端末固有ID（自分のカードの編集/削除の所有権判定。旧行はnull）
+  author_id?: string | null; // 端末固有ID（投稿者の記録。編集/削除は誰でも可・2026-07-20変更。旧行はnull）
   embedding?: number[] | null;
   x?: number | null;
   y?: number | null;
@@ -85,4 +85,15 @@ export interface ClassifyResponse {
   links: ClassifyLink[];
   /** 'quota_exceeded' | 'room_required' | その他サーバ側エラー（200で返る） */
   error?: string;
+}
+
+// ===== /api/synthesize 入出力（FINAL IDEA AI統合） =====
+export interface SynthesizeRequest {
+  room_id: string;
+  nodes: ClassifyCandidate[];
+  edges: { source_id: string; target_id: string; relation: Relation }[];
+}
+/** 成功時は text/plain ストリーム。失敗時のみ application/json { error } が200で返る */
+export interface SynthesizeError {
+  error: string; // 'room_required' | 'no_nodes' | 'quota_exceeded' | 'llm_error'
 }

@@ -321,13 +321,14 @@ export default function Room() {
     [upsertEdge],
   );
 
-  // 自分のカードの本文＋種類を編集 → 再ベクトル化 → 旧エッジ剪定 → 再結線。
+  // カードの本文＋種類を編集 → 再ベクトル化 → 旧エッジ剪定 → 再結線。
+  // 誰のカードでも編集できる（委員会要望・2026-07-20。author_id は投稿者表示のためだけに残す）。
   const editNode = useCallback(
     async (id: string, newText: string, newType: NodeType) => {
       const text = newText.trim();
       if (!text) return;
       const node = useGraphStore.getState().nodes.find((n) => n.id === id);
-      if (!node || node.author_id !== myId) return; // 自分のカードのみ（防御）
+      if (!node) return;
       const updated: GraphNode = { ...node, text, type: newType };
       upsertNode(updated); // 楽観
       if (supabase) {
@@ -364,20 +365,20 @@ export default function Room() {
       }
       await linkNode({ ...updated, embedding: emb });
     },
-    [myId, upsertNode, setEmbedding, removeEdgesByNode, linkNode],
+    [upsertNode, setEmbedding, removeEdgesByNode, linkNode],
   );
 
-  // 自分のカードを削除（ノード＋接続エッジ。DBはカスケードでエッジ削除）。
+  // カードを削除（誰でも可。ノード＋接続エッジ。DBはカスケードでエッジ削除）。
   const deleteNode = useCallback(
     async (id: string) => {
       const node = useGraphStore.getState().nodes.find((n) => n.id === id);
-      if (!node || node.author_id !== myId) return; // 自分のカードのみ（防御）
+      if (!node) return;
       removeNode(id); // 楽観（ノード＋接続エッジをストアから除去）
       if (supabase) {
         await supabase.from('nodes').delete().eq('id', id);
       }
     },
-    [myId, removeNode],
+    [removeNode],
   );
 
   if (!myName) return <JoinDialog onJoin={setMyName} />;

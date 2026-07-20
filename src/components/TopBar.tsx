@@ -82,7 +82,7 @@ export default function TopBar({
             {tidying ? '整える中…' : '整える'}
           </button>
           <Timeline />
-          <FinalIdeaPanel roomId={roomId} />
+          <FinalIdeaPanel roomId={roomId} mode={mode} />
           <ExportPdfButton roomId={roomId} />
           <ShareButton />
         </div>

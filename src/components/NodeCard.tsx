@@ -11,7 +11,6 @@ export interface NodeCardData {
   author: string;
   createdAt?: string;
   isFinal?: boolean;
-  isMine?: boolean; // 自分が入力したカード（編集/削除の可否）
   selected?: boolean; // アプリ独自の選択状態
   dimmed?: boolean;
   replaying?: boolean; // タイムライン再生中は操作を出さない
@@ -41,7 +40,8 @@ export default function NodeCard({ data }: NodeProps) {
   const bodyClamp =
     lod === 'low' ? 'line-clamp-1' : lod === 'mid' ? 'line-clamp-3' : '';
 
-  const canManage = !!d.isMine && !d.isFinal && !d.replaying;
+  // 誰でもすべてのカードを編集/削除できる（委員会要望・2026-07-20）。FINAL採用中と再生中のみ不可。
+  const canManage = !d.isFinal && !d.replaying;
   const showControls =
     canManage && lod !== 'low' && (selected || mode !== 'view');
 

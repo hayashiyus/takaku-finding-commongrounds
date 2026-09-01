@@ -12,107 +12,328 @@
 | 関係判定 | クラウドAI（Claude）が5種を高精度判定 | ブラウザ内AIの段階チェーン（①端末内LLM＝オプトイン ②NLI＝自動 ③類似度） |
 | コスト | 少額のAPI利用 | **完全ゼロ**（モデルは初回DL後キャッシュ） |
 
-- 技術：React 18 + TypeScript + Vite / Tailwind / @xyflow/react + d3-force + elkjs / Transformers.js（端末内埋め込み・NLI）/ WebLLM（端末内LLM）/ Supabase（Realtime・Postgres・pgvector）/ Vercel Functions
+- 技術：React 19 + TypeScript + Vite / Tailwind / @xyflow/react + d3-force + elkjs / Transformers.js（端末内埋め込み・NLI）/ WebLLM（端末内LLM）/ Supabase（Realtime・Postgres・pgvector）/ Vercel Functions
 - 2モード設計の詳細：[`DESIGN.md`](DESIGN.md)
 - 個人情報は収集しません（表示名＝ニックネームのみ・認証なし・未成年利用を想定した設計）
 
 ---
 
-# 第1部 本番デプロイ手順（詳細）
+## 🚦 まず、あなたがしたいことはどれですか？
 
-ゼロから https://takaku-app.vercel.app 相当の本番環境を作る手順です。所要 約30分。
+| したいこと | 進む先 |
+|---|---|
+| 送られてきたリンクを開いて**使いたい** | [第2部 使い方ガイド](#第2部-使い方ガイド-はじめての人へ) へ（インストールは不要です） |
+| **自分のPCで動かしたい**（研究・検証・改造） | [第1部 自分のPCで動かす](#第1部-自分のpcで動かす) へ |
+| **インターネットに公開したい**（自分専用のURLを作る） | [付録A 本番デプロイ](#付録a-本番デプロイsupabase--vercel) へ |
 
-## 0. 必要なもの
+---
 
-| サービス | 用途 | 費用 |
-|---|---|---|
-| [GitHub](https://github.com) | このリポジトリの取得 | 無料 |
-| [Supabase](https://supabase.com) | データベース＋リアルタイム同期 | 無料枠でOK（同時200接続・100msg/秒） |
-| [Vercel](https://vercel.com) | ホスティング＋サーバレス関数 | 無料枠でOK |
-| [Anthropic](https://console.anthropic.com) | PRO版のクラウドAI判定 | **任意**（LITE運用なら不要。実測 ~$0.003/カード） |
-| Node.js 20+ / npm | ローカルビルド | 無料 |
+# 第1部 自分のPCで動かす
 
-## 1. リポジトリ取得と依存インストール
+自分のパソコンの中だけで TAKAKU を動かす手順です。開発の経験がなくても、**上から順に、そのままなぞれば動きます。**
 
-```bash
-git clone https://github.com/hayashiyus/takaku-finding-commongrounds.git
-cd takaku-finding-commongrounds
+## この手順のゴール
+
+> **自分のPCのブラウザで TAKAKU が開き、ニックネームで部屋に入って、カードを1枚追加できる状態。**
+
+ここまで来れば、簡易版（LITE）の機能は**すべて**使えます。AIが線を引くところまで、1台のPCの中だけで完結します。
+
+## 先に安心してほしいこと
+
+- **アカウント登録は一切いりません。** GitHub も Supabase も Vercel も Anthropic も、**この手順では使いません**（それらが必要なのは、インターネットに公開したいときだけです → [付録A](#付録a-本番デプロイsupabase--vercel)）。
+- **お金はかかりません。**
+- **`.env.local` という設定ファイルも作りません。** 何も設定しなくても起動します。
+- パソコンにインストールが必要なのは **Node.js というソフト 1つだけ**です。
+
+## 用意するもの
+
+| | 内容 |
+|---|---|
+| パソコン | Windows または Mac |
+| 空き容量 | **3GB以上**（部品のダウンロードとAIモデルの保存に使います） |
+| インターネット | 必要です。とくに初回は `huggingface.co` と `cdn.jsdelivr.net` につながる回線で行ってください（大学や会社のネットワークだと、この2つがブロックされていることがあります） |
+| 事前に入れるソフト | **Node.js** だけ（この手順の中で入れます） |
+
+かかる時間は、Node.js が未導入なら **20〜40分ほど**が目安です。うち大半はダウンロードの待ち時間で、手を動かす時間は10分ほどです。
+
+## やることは6つ
+
+1. ターミナルを開く
+2. Node.js を入れる
+3. TAKAKU のファイルを手に入れる
+4. そのフォルダに移動する
+5. 部品をそろえる
+6. 起動する
+
+---
+
+## STEP 1 ターミナルを開く
+
+**ターミナル**とは、文字で命令を打ち込むための黒い（または白い）ウィンドウです。ここに、これから何行かの命令を打ちます。
+
+### Windows の場合
+
+1. キーボードの **Windows キー**を押す
+2. そのまま `cmd` と打つ
+3. 出てきた **「コマンド プロンプト」** を **クリックして開く**
+
+> ⚠️ **「管理者として実行」は選ばないでください。** 選ぶと作業の場所がおかしなところ（`C:\Windows\System32`）になり、あとでエラーになります。普通にクリックして開いてください。
+
+開いたら、何も打たずに **Enter** を押してみてください。`C:\Users\あなたの名前>` のような文字が出れば正常です。
+
+### Mac の場合
+
+1. **Command キー + スペースキー** を同時に押す
+2. 出てきた検索窓に、半角英字で `terminal` と打つ
+3. 出てきた **「ターミナル」** を **Enter** で開く
+
+開いたら `pwd` と打って Enter を押してください。`/Users/あなたの名前` のような文字が出れば正常です。
+
+> ✅ **ここまでできたら次へ**：ターミナルが開いて、今いる場所が表示された。
+
+---
+
+## STEP 2 Node.js を入れる
+
+Node.js は、このアプリを動かすための土台になるソフトです。
+
+### まず、すでに入っているか確認する
+
+ターミナルに次を打って Enter：
+
+```
+node -v
+```
+
+- `v22.14.0` のように **v から始まる数字**が出た → 下の「バージョンの確認」へ
+- `command not found` や `認識されていません` と出た → 入っていません。次の「入れる」へ
+
+### 入れる
+
+1. **https://nodejs.org/ja** を開く
+2. ページの上のほうに、OS を選ぶ**ドロップダウン**があります。自分のOS（Windows か macOS）を選びます
+3. **「Windows インストーラー (.msi)」** または **「macOS インストーラー (.pkg)」** と書かれたボタンを押してダウンロード
+4. ダウンロードしたファイルをダブルクリックし、**設定は変えずに「次へ」「続ける」を押していく**だけでOK（Mac では途中でパソコンのパスワードを聞かれます）
+
+> 💡 ページに「nvm」「Homebrew」「fnm」といった選択肢も表示されますが、**選ばないでください**。インストーラー（.msi / .pkg）が一番簡単で確実です。
+
+5. **インストールが終わったら、ターミナルのウィンドウを一度閉じて、開き直してください。** これをしないと、入れたばかりの Node.js をターミナルが見つけられません。
+
+### バージョンの確認
+
+開き直したターミナルで、次の2つを1つずつ打って Enter：
+
+```
+node -v
+```
+
+```
+npm -v
+```
+
+`node -v` の結果が **`v22.12.0` 以上**（または `v20.19.0` 以上の v20 系）なら大丈夫です。
+
+- 例：`v22.14.0` → OK
+- 例：`v24.4.1` → OK
+- 例：`v18.20.4` → 古すぎます。上の「入れる」からやり直してください
+- 例：`v20.11.0` → v20 系ですが `v20.19.0` より古いので、サポート対象外です。入れ直してください
+
+> ✅ **ここまでできたら次へ**：`node -v` と `npm -v` の両方が、数字を返した。
+
+---
+
+## STEP 3 TAKAKU のファイルを手に入れる
+
+1. **https://github.com/hayashiyus/takaku-finding-commongrounds** を開く
+2. 緑色の **「Code」** ボタンを押す
+3. 出てきたメニューの一番下 **「Download ZIP」** を押す
+4. `takaku-finding-commongrounds-main.zip` がダウンロードされます
+
+### 展開する（zipを開く）
+
+- **Windows**：ダウンロードした zip を右クリック →「すべて展開」→「展開」
+- **Mac**：ダウンロードした zip をダブルクリック
+
+**展開してできたフォルダの名前は `takaku-finding-commongrounds-main` です。**（`-main` が後ろに付きます。ここを間違えると、あとで「フォルダが見つかりません」になります）
+
+### 中身を確認する
+
+できたフォルダを開いてください。中に **`package.json`** というファイルが**直接**見えていればOKです。
+
+もし中に**同じ名前のフォルダがもう1つ**入っていたら、そのフォルダを開いてください（Windows の「すべて展開」では、二重に入れ子になることがあります）。`package.json` が見える階層まで降りてください。
+
+> 💡 **置き場所のおすすめ**：OneDrive や iCloud の同期フォルダの中は避けてください。この後で数万個の小さいファイルが作られるため、同期処理とぶつかって非常に遅くなります。`C:\takaku` や、Mac ならホーム直下など、**浅くて同期されない場所**に移動しておくと安心です。
+
+> ✅ **ここまでできたら次へ**：`package.json` が直接見えるフォルダができた。
+
+---
+
+## STEP 4 そのフォルダに移動する
+
+ターミナルに、**そのフォルダの中で作業してください**と伝えます。
+
+### いちばん確実なやり方（Windows / Mac 共通）
+
+1. ターミナルに `cd ` と打ちます（**cd のあとに半角スペースを1つ**入れて、まだ Enter は押さない）
+2. STEP 3 で確認したフォルダ（`package.json` が見えるフォルダ）を、**エクスプローラ／Finder からターミナルのウィンドウにドラッグ＆ドロップ**します
+3. フォルダの場所が自動で入力されるので、**Enter** を押します
+
+`cd` は「change directory（作業する場所を変える）」の意味です。
+
+### 移動できたか確認する
+
+**Windows**：
+
+```
+dir
+```
+
+**Mac**：
+
+```
+ls
+```
+
+表示された一覧の中に **`package.json`** があればOKです。
+
+> ✅ **ここまでできたら次へ**：`dir`（または `ls`）の結果に `package.json` が出た。
+
+---
+
+## STEP 5 部品をそろえる
+
+アプリが動くのに必要な部品を、インターネットから自動でダウンロードします。
+
+```
 npm install
 ```
 
-## 2. Supabase のセットアップ（DB・リアルタイム）
+**数分かかります。** 途中で英語の文章がたくさん流れますが、止まっていなければ正常です。
 
-1. https://supabase.com → **New project**（リージョンは Tokyo 推奨）。
-2. 左メニュー **SQL Editor** で、次の順に実行：
-   1. [`supabase/schema.sql`](supabase/schema.sql) — テーブル（rooms/nodes/edges）・pgvector・RLS・Realtime publication・mode/quota 一式
-   2. [`supabase/migrations/002_room_mode_and_quota.sql`](supabase/migrations/002_room_mode_and_quota.sql) — ※schema.sql を新規実行した場合は既に含まれるが、**冪等なので実行して害なし**（既存DBの更新時は必須）
-   3. [`supabase/migrations/003_node_author_and_edit.sql`](supabase/migrations/003_node_author_and_edit.sql) — **カードの編集・削除機能に必須**（`nodes.author_id` 列）
-3. **Project Settings → API** から以下を控える：
-   - **Project URL**（`https://xxxx.supabase.co`）
-   - **anon key**（クライアント公開用・RLSで保護）
-   - （quota を使う場合のみ）**service_role key**（絶対にクライアントへ出さない）
+- `npm warn deprecated ...` → **無視してOK**です（部品の作者からのお知らせで、失敗ではありません）
+- 最後に **`added 400 packages in 45s`** のように「added ○○ packages」と出れば**成功**です（数字は違って構いません）
 
-## 3. ローカル動作確認
+もし途中に **`npm warn EBADENGINE`** という警告が出たら、それだけは見逃さないでください。**Node.js のバージョンが古い**という意味です。STEP 2 に戻って入れ直してください。
 
-```bash
-cp .env.example .env.local
-# .env.local を編集:
-#   VITE_SUPABASE_URL=（手順2のProject URL）
-#   VITE_SUPABASE_ANON_KEY=（anon key）
-npm run dev   # http://localhost:5173
+> ✅ **ここまでできたら次へ**：`added ○○ packages` が表示された。
+
+---
+
+## STEP 6 起動する
+
+```
+npm run dev
 ```
 
-- 2つのブラウザタブで同じルームを開き、片方でカードを追加→**もう片方に即時に現れれば同期OK**。
-- Supabase未設定でも起動します（ローカル表示のみ・同期なし）。
+> ⚠️ **この1行だけ**を打ってください。うしろに何か文字を足すと起動しません。
 
-## 4. Vercel 本番デプロイ
+数秒待つと、こんな表示が出ます：
 
-```bash
-npm i -g vercel
-vercel login
-vercel          # 初回: プロジェクト作成（Framework: Vite を自動検出 / Output: dist）
+```
+  VITE v8.0.16  ready in 432 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
+  ➜  press h + enter to show help
 ```
 
-**Vercel ダッシュボード → Settings → Environment Variables** に以下を設定：
+バージョンの数字や時間は違って構いません。**`➜  Local:` の行が出れば起動成功**です。
 
-| 変数 | 値 | 種別 |
+> ⚠️ **このターミナルは閉じないでください。** 閉じるとアプリも止まります。開いたままにしておきます。
+
+### ブラウザで開く
+
+ターミナルで **`o` を打って Enter** を押してください。ブラウザが自動で開きます。
+
+うまくいかないときは、画面に出ている **`Local:` の行の URL**（上の例なら `http://localhost:5173/`）をコピーして、ブラウザのアドレス欄に貼り付けてください。
+
+> 💡 **URL の数字は 5173 とは限りません。** 他のアプリが 5173 を使っていると、`Port 5173 is in use, trying another one...` と出て `5174` などに変わります。**必ず画面に出ている URL を使ってください。**
+
+> ✅ **ここまでできたら次へ**：ブラウザに TAKAKU のホーム画面（「本番LLM版」「簡易版」の2つのボタン）が表示された。
+
+---
+
+## STEP 7 部屋に入る
+
+1. **「簡易版」** のカードを押します
+2. 「相関図ツールに参加」という画面が出るので、**ニックネーム**を入れて「参加する」を押します（本名でなくてOK。登録もパスワードもありません）
+3. 相関図の画面が開き、お試し用のカードが何枚か並んでいます
+4. 画面いちばん下の入力欄に**一文**書いて「送信 →」を押します
+
+**カードが1枚増えたら、この手順は完了です。おつかれさまでした。**
+
+### 画面に出る、これらは正常です
+
+| 表示 | 意味 |
+|---|---|
+| 上部の黄色い帯「**Supabase 未設定：ローカル表示（同期なし）**」 | エラーではありません。「このPCの中だけで動いています」という意味です。1台で使う分にはこのままで問題ありません（複数のPCで同時に使いたい場合だけ設定が必要 → [複数のPCで同期させたいとき](#複数のpcで同期させたいとき任意)） |
+| 下部の「**埋め込み準備中…（入力はそのまま可能です）**」 | AIの準備中です。待っている間もカードは書けます |
+| 下部の「**軽量分類モデルを取得中… ○○%**」 | 簡易版のAI（約339MB）をダウンロード中です。**初回だけ**数分かかります。2回目からは一瞬です |
+
+線をきれいに引かせたい場合は、下部の表示が「**関係判定: 軽量分類（端末内NLI）**」に変わってから書き始めてください。先に書いてしまった場合は「**線を引き直す**」ボタンを1回押せば引き直されます。
+
+---
+
+## 止め方・次に使うとき・更新のしかた
+
+### 止める
+
+ターミナルで **`q` を打って Enter**。
+
+効かないときは **Ctrl キーを押しながら C**。Windows のコマンドプロンプトでは続けて `Terminate batch job (Y/N)?` と聞かれるので、`Y` を打って Enter。
+
+ターミナルのウィンドウを閉じても止まります。
+
+### 次に使うとき
+
+**`npm install` は初回だけ**です。2回目からは2手だけ：
+
+1. ターミナルを開き、STEP 4 のやり方でフォルダに移動する
+2. `npm run dev` を打つ
+
+### 新しい版に更新する
+
+ZIP で入れた場合は、[STEP 3](#step-3-takaku-のファイルを手に入れる) からやり直して**新しいフォルダ**に展開し、そのフォルダで `npm install` を実行してください（`git pull` は使えません）。
+
+---
+
+## 困ったとき
+
+**ターミナルに出ている文字**を、下の「症状」と見比べてください。全文が一致しなくても、**特徴的な一言**が合っていればその行です。
+
+| 症状（画面に出る文字） | 原因 | どうする |
 |---|---|---|
-| `VITE_SUPABASE_URL` | `https://xxxx.supabase.co` | クライアント公開 |
-| `VITE_SUPABASE_ANON_KEY` | anon key | クライアント公開 |
-| `VITE_FEATURE_LLM_LINKING` | `true` （**必須**。falseにするとLITEのNLIまで無効化される緊急キルスイッチ） | クライアント公開 |
-| `VITE_EMBEDDING_MODEL` | `Xenova/multilingual-e5-small` | クライアント公開 |
-| `VITE_LINK_TOPK` / `VITE_LINK_SIM_FLOOR` | `6` / `0.80` | クライアント公開 |
-| `LLM_PROVIDER` / `LLM_MODEL` | `anthropic` / `claude-haiku-4-5` | **サーバ専用**（PRO版のみ） |
-| `LLM_API_KEY` | Anthropic APIキー | **サーバ専用**（PRO版のみ） |
-| `LINK_CONFIDENCE_THRESHOLD` | `0.6` | サーバ専用（PRO版のみ） |
-| `LLM_MAX_CALLS_PER_ROOM` | `400` | サーバ専用（任意・quota） |
-| `SYNTH_MODEL` | （未設定なら`LLM_MODEL`） | サーバ専用（任意・FINAL IDEA AI統合だけ別モデルにする。例: 線=Haiku/統合=`claude-fable-5`） |
-| `SYNTH_MAX_TOKENS` | `4000`（fable系は`16000`） | サーバ専用（任意・FINAL IDEA AI統合の出力上限） |
-| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | 手順2の値 | サーバ専用（任意・quota有効化。未設定なら quota なしで動作） |
+| `'npm' は、内部コマンドまたは外部コマンド…として認識されていません` / `zsh: command not found: npm` | Node.js が入っていない。または入れた直後でターミナルが気づいていない | ターミナルを**閉じて開き直して** `node -v`。それでも出なければ [STEP 2](#step-2-nodejs-を入れる) からやり直す |
+| `npm warn EBADENGINE Unsupported engine` | Node.js が古い | [STEP 2](#step-2-nodejs-を入れる) で入れ直す |
+| PowerShell で `npm : ... npm.ps1 を読み込むことができません` `スクリプトの実行が無効になっているため` | PowerShell の初期設定が npm を止めている | **コマンドプロンプト**（Windows キー →`cmd`）で開き直して、同じコマンドを打つ。それが一番簡単です |
+| `npm error code ENOENT` / `package.json` が無いと言われる / `Missing script: dev` | `package.json` があるフォルダにいない | `dir`（Mac は `ls`）を打ち、`package.json` が出るまでフォルダを降りる。[STEP 4](#step-4-そのフォルダに移動する) のドラッグ＆ドロップが確実 |
+| `cd` で `指定されたパスが見つかりません` / `no such file or directory` | フォルダ名が違う（ZIP から展開したものは `-main` が付きます） | フォルダをターミナルに**ドラッグ＆ドロップ**して入力させる |
+| `CACError: Unused args:` と赤い文字がたくさん出て終わる | `npm run dev` のうしろに余計な文字を貼り付けた | **`npm run dev` だけ**を打ち直す |
+| ブラウザで「アクセスできません」 | URL が違う。5173 が使用中で別の番号になっている | ターミナルの `➜  Local:` の行の URL を使う。`o` + Enter でも開けます |
+| 昨日は動いたのに今日は開かない | ターミナルを閉じたのでアプリも止まっている | ターミナルを開き、フォルダに移動して `npm run dev` |
+| ターミナルが反応しない・文字が打てない | アプリが動作中（正常です） | 止めるなら `q` + Enter。別の作業をしたいならターミナルをもう1枚開く |
+| 「軽量分類モデルの読み込みに失敗しました（類似度のみで継続）」 | `huggingface.co` / `cdn.jsdelivr.net` にネットワークがつながっていない | 別の回線（自宅やスマホのテザリング）で一度開くと、ブラウザに保存されて次から使えます。失敗しても簡易的な線は引かれます |
+| `npm install` が異常に遅い / `EPERM` エラー | フォルダが OneDrive / iCloud の同期対象にある | フォルダを同期されない場所（`C:\takaku` など）に移し、`node_modules` フォルダを削除してから `npm install` をやり直す |
+| Windows で権限エラーが出る / 現在地が `C:\Windows\System32` | ターミナルを「管理者として実行」で開いた | そのウィンドウを閉じ、**管理者ではない**コマンドプロンプトを開き直す |
 
-その他の調整変数（NLIしきい値・WebLLMモデル等）は [`.env.example`](.env.example) を参照。
+---
 
-```bash
-vercel --prod   # 本番デプロイ
-```
+## 複数のPCで同期させたいとき（任意）
 
-## 5. デプロイ後チェックリスト
+1台で使う分には**不要**です。複数のPCやスマホから同じ部屋に入りたい場合だけ、データベース（Supabase）の設定をします。
 
-- [ ] 発行URLを開き、ホームから「簡易版」ルームを作成できる
-- [ ] `https://<あなたのURL>/r/test123` の**直リンクでも**アプリが開く（SPAリライト確認）
-- [ ] PC+スマホの2端末で同じルームを開き、カード追加が**双方向に即時同期**される
-- [ ] カード2枚（例:「再生厚紙は水にぬれると破れやすい」「再生厚紙は水にぬれると簡単に破れてしまう」）で**緑の「根拠づける」線**が出る（ステータスバーが「軽量分類（端末内NLI）」になってから入力）
-- [ ] カードをタップ→「✎ 編集」「🗑 削除」が出る（誰のカードでも可）
-- [ ] 「PDF出力」で印刷ビューが開き、時系列のカード一覧が表示される
-- [ ] （PRO利用時）PROルームで4種の型付き線が出る（出ずに全部「関連」なら Anthropic クレジット残高を確認）
+1. [付録A の手順2](#2-supabase-のセットアップdbリアルタイム) にしたがって Supabase のプロジェクトを作り、**Project URL** と **anon key** を控える
+2. TAKAKU のフォルダにある **`.env.example`** をコピーし、コピーしたほうの名前を **`.env.local`** に変える
+3. `.env.local` をテキストエディタ（メモ帳／テキストエディット）で開き、次の2行の `=` のうしろに控えた値を貼り付けて保存する
 
-## 6. 運用の注意（実運用で得た知見）
+   ```
+   VITE_SUPABASE_URL=
+   VITE_SUPABASE_ANON_KEY=
+   ```
 
-- **PRO版を使う場合は Anthropic コンソールで spend limit を必ず設定**（ルーム単位quotaはコスト上限であってグローバル上限ではない）。
-- **授業の前日までに生徒端末で一度ルームを開いておく**（LITEのAIモデル約339MBが端末にキャッシュされ、当日は数十秒で準備完了）。huggingface.co / cdn.jsdelivr.net への到達性を学校ネットワークで確認。
-- **リンクは Safari / Chrome で開く案内を**。LINE・Messenger等のアプリ内ブラウザでも動作するが、名前の保存やモデルキャッシュが制限される。
-- **大人数（100名超）の例会は「入力代表制」を推奨**：入力は各班の書記12〜15端末のみ、他は口頭参加＋会場スクリーン投影（1接続）。全員が同時入力するとリアルタイム配信が無料枠上限（100msg/秒）を超える。
-- モデル配信・NLIしきい値など詳細設計は [`DESIGN.md`](DESIGN.md)。
+4. ターミナルで `q` + Enter → もう一度 `npm run dev`
+
+黄色い帯が消え、2つのブラウザで同じ部屋を開くとカードが即座に共有されます。
 
 ---
 
@@ -205,6 +426,123 @@ AIは**文章の意味**を読みます。だから——
 | 間違えて送信した | カードをタップ →「🗑 削除」または「✎ 編集」 |
 | 画面がごちゃごちゃ | メニュー →「整える」。それでも多ければ左上「関連線を表示」をOFF |
 | 入室画面に戻された | もう一度同じニックネームで入ればOK（普通は自動で戻ります） |
+
+---
+
+# 付録A 本番デプロイ（Supabase + Vercel）
+
+ゼロから https://takaku-app.vercel.app 相当の**インターネット公開環境**を作る手順です。所要 約30分。
+
+> ℹ️ **自分のPCで動かすだけなら、この付録は不要です** → [第1部](#第1部-自分のpcで動かす)
+
+## 0. 必要なもの
+
+| サービス | 用途 | 費用 |
+|---|---|---|
+| [GitHub](https://github.com) | このリポジトリの取得 | 無料 |
+| [Supabase](https://supabase.com) | データベース＋リアルタイム同期 | 無料枠でOK（同時200接続・100msg/秒） |
+| [Vercel](https://vercel.com) | ホスティング＋サーバレス関数 | 無料枠でOK |
+| [Anthropic](https://console.anthropic.com) | PRO版のクラウドAI判定 | **任意**（LITE運用なら不要。実測 ~$0.003/カード） |
+| Node.js（`^20.19.0` または `>=22.12.0`）/ npm | ローカルビルド | 無料 |
+
+## 1. リポジトリ取得と依存インストール
+
+```bash
+git clone https://github.com/hayashiyus/takaku-finding-commongrounds.git
+cd takaku-finding-commongrounds
+npm install
+```
+
+## 2. Supabase のセットアップ（DB・リアルタイム）
+
+1. https://supabase.com → **New project**（リージョンは Tokyo 推奨）。
+2. 左メニュー **SQL Editor** で、次の順に実行：
+   1. [`supabase/schema.sql`](supabase/schema.sql) — テーブル（rooms/nodes/edges）・pgvector・RLS・Realtime publication・mode/quota 一式
+   2. [`supabase/migrations/002_room_mode_and_quota.sql`](supabase/migrations/002_room_mode_and_quota.sql) — ※schema.sql を新規実行した場合は既に含まれるが、**冪等なので実行して害なし**（既存DBの更新時は必須）
+   3. [`supabase/migrations/003_node_author_and_edit.sql`](supabase/migrations/003_node_author_and_edit.sql) — **カードの編集・削除機能に必須**（`nodes.author_id` 列）
+3. **Project Settings → API** から以下を控える：
+   - **Project URL**（`https://xxxx.supabase.co`）
+   - **anon key**（クライアント公開用・RLSで保護）
+   - （quota を使う場合のみ）**service_role key**（絶対にクライアントへ出さない）
+
+## 3. ローカル動作確認
+
+`.env.example` をコピーして `.env.local` を作り、次の2行に手順2の値を入れます。
+
+```
+VITE_SUPABASE_URL=
+VITE_SUPABASE_ANON_KEY=
+```
+
+保存したら起動します。
+
+```bash
+npm run dev
+```
+
+- 2つのブラウザタブで同じルームを開き、片方でカードを追加→**もう片方に即時に現れれば同期OK**。
+- Supabase未設定でも起動します（ローカル表示のみ・同期なし）。
+
+## 4. Vercel 本番デプロイ
+
+```bash
+npm i -g vercel
+vercel login
+vercel
+```
+
+初回は Framework: Vite が自動検出され、Output は `dist` になります。
+
+**Vercel ダッシュボード → Settings → Environment Variables** に以下を設定：
+
+| 変数 | 値 | 種別 |
+|---|---|---|
+| `VITE_SUPABASE_URL` | `https://xxxx.supabase.co` | クライアント公開 |
+| `VITE_SUPABASE_ANON_KEY` | anon key | クライアント公開 |
+| `VITE_FEATURE_LLM_LINKING` | `true` （**必須**。falseにするとLITEのNLIまで無効化される緊急キルスイッチ） | クライアント公開 |
+| `VITE_EMBEDDING_MODEL` | `Xenova/multilingual-e5-small` | クライアント公開 |
+| `VITE_LINK_TOPK` / `VITE_LINK_SIM_FLOOR` | `6` / `0.80` | クライアント公開 |
+| `LLM_PROVIDER` / `LLM_MODEL` | `anthropic` / `claude-haiku-4-5` | **サーバ専用**（PRO版のみ） |
+| `LLM_API_KEY` | Anthropic APIキー | **サーバ専用**（PRO版のみ） |
+| `LINK_CONFIDENCE_THRESHOLD` | `0.6` | サーバ専用（PRO版のみ） |
+| `LLM_MAX_CALLS_PER_ROOM` | `400` | サーバ専用（任意・quota） |
+| `SYNTH_MODEL` | （未設定なら`LLM_MODEL`） | サーバ専用（任意・FINAL IDEA AI統合だけ別モデルにする。例: 線=Haiku/統合=`claude-fable-5`） |
+| `SYNTH_MAX_TOKENS` | `4000`（fable系は`16000`） | サーバ専用（任意・FINAL IDEA AI統合の出力上限） |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | 手順2の値 | サーバ専用（任意・quota有効化。未設定なら quota なしで動作） |
+
+その他の調整変数（NLIしきい値・WebLLMモデル等）は [`.env.example`](.env.example) を参照。
+
+```bash
+vercel --prod
+```
+
+## 5. デプロイ後チェックリスト
+
+- [ ] 発行URLを開き、ホームから「簡易版」ルームを作成できる
+- [ ] `https://<あなたのURL>/r/test123` の**直リンクでも**アプリが開く（SPAリライト確認）
+- [ ] PC+スマホの2端末で同じルームを開き、カード追加が**双方向に即時同期**される
+- [ ] カード2枚（例:「再生厚紙は水にぬれると破れやすい」「再生厚紙は水にぬれると簡単に破れてしまう」）で**緑の「根拠づける」線**が出る（ステータスバーが「軽量分類（端末内NLI）」になってから入力）
+- [ ] カードをタップ→「✎ 編集」「🗑 削除」が出る（誰のカードでも可）
+- [ ] 「PDF出力」で印刷ビューが開き、時系列のカード一覧が表示される
+- [ ] （PRO利用時）PROルームで4種の型付き線が出る（出ずに全部「関連」なら Anthropic クレジット残高を確認）
+
+## 6. 運用の注意（実運用で得た知見）
+
+- **PRO版を使う場合は Anthropic コンソールで spend limit を必ず設定**（ルーム単位quotaはコスト上限であってグローバル上限ではない）。
+- **授業の前日までに生徒端末で一度ルームを開いておく**（LITEのAIモデル約339MBが端末にキャッシュされ、当日は数十秒で準備完了）。huggingface.co / cdn.jsdelivr.net への到達性を学校ネットワークで確認。
+- **リンクは Safari / Chrome で開く案内を**。LINE・Messenger等のアプリ内ブラウザでも動作するが、名前の保存やモデルキャッシュが制限される。
+- **大人数（100名超）の例会は「入力代表制」を推奨**：入力は各班の書記12〜15端末のみ、他は口頭参加＋会場スクリーン投影（1接続）。全員が同時入力するとリアルタイム配信が無料枠上限（100msg/秒）を超える。
+- モデル配信・NLIしきい値など詳細設計は [`DESIGN.md`](DESIGN.md)。
+
+---
+
+# 付録B 環境まわりの補足
+
+- **Node.js のバージョン要件**：アプリの起動に必要なのは `vite@8` と `@vitejs/plugin-react@6` が要求する `^20.19.0 || >=22.12.0` です。`npm run lint` まで使う場合は eslint が `^20.19.0 || ^22.13.0 || >=24` を要求します。迷ったら最新のインストーラーを入れてください。
+- **`git` は必須ではありません**：このリポジトリは git 経由で取得する依存パッケージを持たず、`postinstall` などのスクリプトもありません。ZIP をダウンロードするだけで `npm install` から起動まで到達できます。
+- **macOS で `git` を初めて使うとき**：`/usr/bin/git` は本体ではなく呼び出し口なので、開発ツールのインストールを促すダイアログが出ます。ZIP 経路を使う場合はキャンセルして構いません。
+- **PowerShell で `npm` が止まる件**：Windows 内蔵の PowerShell は初期設定でスクリプトの実行を禁じており、`npm.ps1` が読み込めません。コマンドプロンプトを使えば起きません。設定変更（`Set-ExecutionPolicy`）は大学等の管理端末では反映されないことがあります。
+- ⚠️ **未検証**：本ドキュメントの Windows 側の画面文言・ボタン配置は実機で確認していません。OS の更新で変わる可能性があります。表示が違う場合は、書かれている**目印の言葉**（`package.json`、`added ○○ packages`、`➜  Local:` など）を手がかりにしてください。
 
 ---
 

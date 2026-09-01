@@ -7,6 +7,7 @@ import {
   forceSimulation,
 } from 'd3-force';
 import type { GraphEdge, GraphNode } from '../types';
+import { COLLIDE_R } from './cardMetrics';
 
 export interface LayoutResult {
   id: string;
@@ -49,7 +50,8 @@ export function computeLayout(
         .strength(0.5),
     )
     .force('center', forceCenter(width / 2, height / 2))
-    .force('collide', forceCollide(72))
+    // 衝突半径はカード実寸から導出する。以前は 72 固定で、長文カードが重なっていた。
+    .force('collide', forceCollide(COLLIDE_R))
     .stop();
 
   for (let i = 0; i < 300; i++) sim.tick();

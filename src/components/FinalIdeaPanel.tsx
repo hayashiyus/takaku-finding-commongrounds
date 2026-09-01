@@ -1,8 +1,13 @@
 // FINAL IDEA（SPEC §9.2）：rooms.final_idea を編集・保存し、核ノードを is_final で強調。
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { useGraphStore } from '../store/graphStore';
 import { NODE_META } from '../lib/relations';
+import {
+  NODE_TEXT_SOFT_MIN,
+  SYNTH_NODE_LIMIT,
+  isSynthesizable,
+} from '../lib/validation';
 import type { RoomMode, SynthesizeRequest, SynthesizeError } from '../types';
 
 export default function FinalIdeaPanel({
@@ -36,11 +41,23 @@ export default function FinalIdeaPanel({
     window.setTimeout(() => setSaveState('idle'), 1500);
   };
 
+  // 要望#7:「短すぎる意見は運営で削除する」→ アプリ側で統合の材料から外して下支えする。
+  // カード自体は画面に残し、AI統合の入力からだけ除く。除外件数は必ず画面に出す。
+  const synthNodes = useMemo(() => nodes.filter((n) => isSynthesizable(n.text)), [nodes]);
+  const excludedCount = nodes.length - synthNodes.length;
+  const overLimit = Math.max(0, synthNodes.length - SYNTH_NODE_LIMIT);
+
   const generate = async () => {
     if (generating) return;
     const prev = finalIdea;
     if (nodes.length === 0) {
       setGenError('カードがまだありません。まずカードを投稿してください。');
+      return;
+    }
+    if (synthNodes.length === 0) {
+      setGenError(
+        'AIが読み取れる長さのカードがありません。もう少し詳しく書いたカードを追加してください。',
+      );
       return;
     }
     if (finalIdea.trim()) {
@@ -60,7 +77,7 @@ export default function FinalIdeaPanel({
         signal: ac.signal,
         body: JSON.stringify({
           room_id: roomId,
-          nodes: nodes.map((n) => ({ id: n.id, type: n.type, text: n.text })),
+          nodes: synthNodes.map((n) => ({ id: n.id, type: n.type, text: n.text })),
           edges: edges.map((e) => ({ source_id: e.source_id, target_id: e.target_id, relation: e.relation })),
         } satisfies SynthesizeRequest),
       });
@@ -157,8 +174,26 @@ export default function FinalIdeaPanel({
             {mode === 'pro' && (
               <>
                 <p className="font-jp text-[11px] text-ink-soft mb-2">
-                  AIが全カードを分析し、対立を止揚（アウフヘーベン）した統合案を提案します。
+                  AIがカードを分析し、対立を止揚（アウフヘーベン）した統合案を提案します。
                 </p>
+                {/* 要望#7: 何が統合の材料になっているかを事前に見せる。
+                    以前は全件を無条件に送っており、切り捨てもサイレントだった。 */}
+                <div className="font-jp text-[11px] text-ink-soft mb-2 rounded border border-line px-2 py-1.5">
+                  材料にするカード <b className="text-ink">{synthNodes.length}</b> 件
+                  {excludedCount > 0 && (
+                    <>
+                      {' '}／ 除外 <b style={{ color: '#b45309' }}>{excludedCount}</b> 件
+                      <span className="block mt-0.5">
+                        {NODE_TEXT_SOFT_MIN}文字未満のカードは、AIが意図を読み取れないため統合の材料から外しています（カード自体は残ります）。
+                      </span>
+                    </>
+                  )}
+                  {overLimit > 0 && (
+                    <span className="block mt-0.5" style={{ color: '#b45309' }}>
+                      上限 {SYNTH_NODE_LIMIT} 件を超えているため、古い {overLimit} 件は送信されません。
+                    </span>
+                  )}
+                </div>
                 <button
                   onClick={generate}
                   disabled={generating}

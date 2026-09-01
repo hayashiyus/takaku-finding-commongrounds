@@ -63,7 +63,9 @@ interface GraphState {
   setNodes: (n: GraphNode[]) => void;
   setEdges: (e: GraphEdge[]) => void;
   upsertNode: (n: GraphNode) => void;
+  setNodePosition: (id: string, x: number, y: number) => void; // ドラッグ確定時の座標反映
   upsertEdge: (e: GraphEdge) => void;
+  upsertEdges: (e: GraphEdge[]) => void; // 複数エッジを1回の set() で反映（再描画を1回に抑える）
   removeNode: (id: string) => void; // ノード＋接続エッジをストアから除去（削除・リモートDELETE反映）
   removeEdge: (id: string) => void; // エッジ1本を除去（リモートDELETE反映）
   removeEdgesByNode: (nodeId: string) => void; // 接続エッジのみ除去（編集の線引き直し）
@@ -136,8 +138,26 @@ export const useGraphStore = create<GraphState>((set) => ({
     set((s) => {
       const i = s.nodes.findIndex((x) => x.id === n.id);
       if (i === -1) return { nodes: [...s.nodes, n] };
+      const prev = s.nodes[i];
+      const merged: GraphNode = { ...prev, ...n };
+      // 素朴なスプレッドだと、リモート UPDATE のペイロードに含まれる x=null / y=null が
+      // 「整える」で決めたローカル座標を上書きし、誰かがカードを編集したり★を付けただけで
+      // 全員の整列がバンド配置へ戻っていた（アンケート要望#2/#4/#6 の前提バグ）。
+      // DB が実座標を持っているときだけ採用する。
+      if (n.x == null) merged.x = prev.x;
+      if (n.y == null) merged.y = prev.y;
+      // 埋め込みも UPDATE ペイロードに含まれないことがあるため同様に温存する。
+      if (n.embedding == null) merged.embedding = prev.embedding;
       const next = s.nodes.slice();
-      next[i] = { ...next[i], ...n };
+      next[i] = merged;
+      return { nodes: next };
+    }),
+  setNodePosition: (id, x, y) =>
+    set((s) => {
+      const i = s.nodes.findIndex((n) => n.id === id);
+      if (i === -1) return {};
+      const next = s.nodes.slice();
+      next[i] = { ...next[i], x, y };
       return { nodes: next };
     }),
   upsertEdge: (e) =>
@@ -150,6 +170,23 @@ export const useGraphStore = create<GraphState>((set) => ({
       if (i === -1) return { edges: [...s.edges, e] };
       const next = s.edges.slice();
       next[i] = { ...next[i], ...e };
+      return { edges: next };
+    }),
+  // 要望#3: 1カード投稿で提案エッジを1本ずつ upsert していたため、
+  // 「1(node) + k(edges)」回の全再描画が全参加者の端末で起きていた。まとめて1回にする。
+  upsertEdges: (list) =>
+    set((s) => {
+      if (list.length === 0) return {};
+      const next = s.edges.slice();
+      for (const e of list) {
+        const i = next.findIndex(
+          (x) =>
+            x.id === e.id ||
+            (x.source_id === e.source_id && x.target_id === e.target_id),
+        );
+        if (i === -1) next.push(e);
+        else next[i] = { ...next[i], ...e };
+      }
       return { edges: next };
     }),
   removeNode: (id) =>

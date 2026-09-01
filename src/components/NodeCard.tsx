@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import type { NodeProps } from '@xyflow/react';
 import { NODE_META, NODE_TYPE_ORDER } from '../lib/relations';
+import { CARD_W } from '../lib/cardMetrics';
+import { NODE_TEXT_MAX, validateNodeText } from '../lib/validation';
 import type { NodeType } from '../types';
 
 export interface NodeCardData {
@@ -24,7 +26,21 @@ type Mode = 'view' | 'edit' | 'confirm';
 // React Flow のドラッグ/パン/選択トグルへ伝播させない
 const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
 
-export default function NodeCard({ data }: NodeProps) {
+// 展開表示（選択＋高ズーム）でも本文がここを超えたら内部スクロールにする。
+// カード自体が青天井に伸びると、レイアウト計算の想定高（CARD_H_LAYOUT）を破って
+// 隣や下の帯に食い込む（アンケート要望#1(B)）。
+const EXPANDED_BODY_MAX_H = 168;
+
+// Tailwind はソース中のリテラル文字列しか拾わないため、clamp クラスは必ずベタ書きする
+// （`line-clamp-${n}` のような組み立ては CSS が生成されず無効になる）。
+// 行数は cardMetrics.ts の BODY_LINES_* と対応させること。
+const CLAMP: Record<'low' | 'mid' | 'high', string> = {
+  low: 'line-clamp-1',
+  mid: 'line-clamp-3',
+  high: 'line-clamp-6',
+};
+
+function NodeCard({ data }: NodeProps) {
   const d = data as unknown as NodeCardData;
   const meta = NODE_META[d.type];
   const selected = !!d.selected;
@@ -33,12 +49,16 @@ export default function NodeCard({ data }: NodeProps) {
   const [mode, setMode] = useState<Mode>('view');
   const [draft, setDraft] = useState(d.text);
   const [draftType, setDraftType] = useState<NodeType>(d.type);
+  const [err, setErr] = useState<string | null>(null);
 
   // LOD: 遠い(low)は色チップ化して情報を間引き、近づくと詳細を出す。
   const showBadge = lod !== 'low'; // low は種類文字を隠し、枠の色で種類を示す
   const showAuthor = (selected || hovered) && lod !== 'low'; // 名前は選択/ホバー時のみ
-  const bodyClamp =
-    lod === 'low' ? 'line-clamp-1' : lod === 'mid' ? 'line-clamp-3' : '';
+
+  // 要望#1(C): 以前は lod==='high' で clamp が外れ、ズームインしただけで全カードが
+  // 縦に膨らんで整列が重なりに変わっていた。全文を読めるのは「選択したカード」だけにする。
+  const expanded = selected && lod === 'high';
+  const bodyClamp = expanded ? '' : CLAMP[lod];
 
   // 誰でもすべてのカードを編集/削除できる（委員会要望・2026-07-20）。FINAL採用中と再生中のみ不可。
   const canManage = !d.isFinal && !d.replaying;
@@ -48,27 +68,41 @@ export default function NodeCard({ data }: NodeProps) {
   const startEdit = () => {
     setDraft(d.text);
     setDraftType(d.type);
+    setErr(null);
     setMode('edit');
   };
   const save = () => {
-    const t = draft.trim();
-    if (t) d.onEdit?.(d.id, t, draftType);
+    // 要望#7: 短すぎる入力をここで止める。以前は trim() の空チェックしか無かった。
+    const check = validateNodeText(draft);
+    if (!check.ok) {
+      setErr(check.reason ?? '入力を確認してください');
+      return;
+    }
+    d.onEdit?.(d.id, draft.trim(), draftType);
+    setErr(null);
     setMode('view');
   };
-  const cancel = () => setMode('view');
+  const cancel = () => {
+    setErr(null);
+    setMode('view');
+  };
   const doDelete = () => {
     d.onDelete?.(d.id);
     setMode('view');
   };
 
+  const draftLen = [...draft.trim()].length;
+
   return (
     <div
-      className="rounded-md bg-white shadow-sm px-3 py-2 text-left"
+      // 要望#1(A): 幅は固定なのに折り返し指定が無く、URL や英単語が枠を突き抜けていた。
+      // overflow-hidden で確実にクリップする（PrintView と同じ扱いに揃える）。
+      className="rounded-md bg-white shadow-sm px-3 py-2 text-left overflow-hidden"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
         border: `${d.isFinal ? 3 : 1.6}px solid ${d.isFinal ? '#d97706' : meta.color}`,
-        width: 210,
+        width: CARD_W,
         boxShadow: selected ? `0 0 0 3px ${meta.color}33` : undefined,
         opacity: d.dimmed ? 0.28 : 1,
         transition: 'opacity 0.3s ease',
@@ -101,17 +135,30 @@ export default function NodeCard({ data }: NodeProps) {
           <textarea
             autoFocus
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              if (err) setErr(null);
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save();
               if (e.key === 'Escape') cancel();
             }}
-            rows={3}
-            className="w-full font-jp text-[14px] leading-snug text-ink border rounded px-1.5 py-1 resize-none"
-            style={{ borderColor: '#d1d5db' }}
+            // 要望#1(D): rows 固定だと編集中の見た目と保存後の高さが食い違い、
+            // 保存した瞬間にカードが伸びて周囲に食い込む。内容に追従させる。
+            rows={Math.min(8, Math.max(3, Math.ceil(draft.length / 22)))}
+            maxLength={NODE_TEXT_MAX}
+            className="w-full font-jp text-[14px] leading-snug text-ink border rounded px-1.5 py-1 resize-none break-words"
+            style={{ borderColor: err ? '#c1121f' : '#d1d5db' }}
           />
+          {err && (
+            <div className="font-jp text-[11px] mt-1" style={{ color: '#c1121f' }}>
+              {err}
+            </div>
+          )}
           <div className="flex items-center justify-between mt-1.5">
-            <span className="font-jp text-[9px] text-ink-soft">⌘/Ctrl+Enter</span>
+            <span className="font-jp text-[9px] text-ink-soft">
+              {draftLen}/{NODE_TEXT_MAX}
+            </span>
             <div className="flex gap-1.5">
               <button
                 onClick={cancel}
@@ -139,11 +186,19 @@ export default function NodeCard({ data }: NodeProps) {
               {d.isFinal ? 'ひとつの像' : meta.jaLabel}
             </div>
           )}
-          <div className={`font-jp text-[14px] leading-snug text-ink ${bodyClamp}`}>
+          <div
+            // nowheel: 展開時の内部スクロールでキャンバスがズームしないように
+            className={`font-jp text-[14px] leading-snug text-ink break-words whitespace-pre-wrap ${bodyClamp} ${expanded ? 'nowheel nodrag' : ''}`}
+            style={
+              expanded
+                ? { maxHeight: EXPANDED_BODY_MAX_H, overflowY: 'auto' }
+                : undefined
+            }
+          >
             {d.text}
           </div>
           {showAuthor && (
-            <div className="font-jp text-[11px] text-ink-soft mt-1 text-right">
+            <div className="font-jp text-[11px] text-ink-soft mt-1 text-right break-words">
               {d.createdAt && (
                 <span className="mr-1">
                   {new Date(d.createdAt).toLocaleTimeString('ja-JP', {
@@ -212,3 +267,7 @@ export default function NodeCard({ data }: NodeProps) {
     </div>
   );
 }
+
+// 要望#3: ストア更新のたびに全カードが再レンダリングされ、React Flow が全ノードの
+// 寸法を同期再計測していた。GraphCanvas 側で data の参照を安定させたうえで memo 化する。
+export default memo(NodeCard);

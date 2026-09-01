@@ -1,5 +1,10 @@
 import { useState } from 'react';
 import { NODE_META, NODE_TYPE_ORDER } from '../lib/relations';
+import {
+  NODE_TEXT_MAX,
+  textLength,
+  validateNodeText,
+} from '../lib/validation';
 import type { NodeType } from '../types';
 
 export default function InputBar({
@@ -11,12 +16,21 @@ export default function InputBar({
 }) {
   const [type, setType] = useState<NodeType>('fact');
   const [text, setText] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+
+  // 要望#7: 短すぎる意見を投稿前に止める。以前は空文字チェックしかなく、
+  // 「あ」1文字のカードが埋め込み→関係判定→FINAL IDEA まで通っていた。
+  const check = validateNodeText(text);
+  const len = textLength(text);
 
   const submit = () => {
-    const t = text.trim();
-    if (!t) return;
-    onSubmit(type, t);
+    if (!check.ok) {
+      setErr(check.reason ?? '入力を確認してください');
+      return;
+    }
+    onSubmit(type, text.trim());
     setText('');
+    setErr(null);
   };
 
   return (
@@ -41,18 +55,38 @@ export default function InputBar({
           );
         })}
       </div>
-      <p className="font-jp text-[10px] text-ink-soft mb-1">
-        単語より「一文」で書くと、AIが関係（根拠・対立など）を見つけやすくなります
-      </p>
+      <div className="flex items-baseline gap-2 mb-1">
+        <p
+          className="font-jp text-[10px] flex-1 text-ink-soft"
+          style={err ? { color: '#c1121f' } : undefined}
+        >
+          {err ??
+            check.hint ??
+            '単語より「一文」で書くと、AIが関係（根拠・対立など）を見つけやすくなります'}
+        </p>
+        {len > 0 && (
+          <span
+            className="font-mono text-[10px] shrink-0"
+            style={{ color: len > NODE_TEXT_MAX ? '#c1121f' : '#8a8a85' }}
+          >
+            {len}/{NODE_TEXT_MAX}
+          </span>
+        )}
+      </div>
       <div className="flex gap-2">
         <input
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            if (err) setErr(null);
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') submit();
           }}
+          maxLength={NODE_TEXT_MAX}
           placeholder={NODE_META[type].example}
-          className="flex-1 font-jp text-[16px] sm:text-[15px] border border-line rounded px-3 py-2.5 sm:py-2 outline-none"
+          className="flex-1 font-jp text-[16px] sm:text-[15px] border rounded px-3 py-2.5 sm:py-2 outline-none"
+          style={{ borderColor: err ? '#c1121f' : '#cdc8b8' }}
         />
         <button
           onClick={submit}

@@ -36,7 +36,22 @@ function orderBySimilarity(
   if (withEmb.length <= 2) return [...withEmb, ...without];
   const byId = new Map(withEmb.map((n) => [n.id, n] as const));
   const remaining = new Set(withEmb.map((n) => n.id));
+  // 始点は「最も中心的なカード」（平均類似度が最大）。配列先頭を始点にすると、
+  // たまたま外れ値のカードから連鎖が始まり、並びの質が投稿順の運に左右される。
+  // N≤200・384次元なら O(N²·D) は数十ms で収まる。
   let cur = withEmb[0];
+  let bestAvg = -Infinity;
+  for (const a of withEmb) {
+    let sum = 0;
+    for (const b of withEmb) {
+      if (a.id !== b.id) sum += cosine(embById[a.id], embById[b.id]);
+    }
+    const avg = sum / (withEmb.length - 1);
+    if (avg > bestAvg) {
+      bestAvg = avg;
+      cur = a;
+    }
+  }
   remaining.delete(cur.id);
   const out: GraphNode[] = [cur];
   while (remaining.size > 0) {
@@ -61,6 +76,9 @@ export async function computeElkLayout(
   nodes: GraphNode[],
   edges: GraphEdge[],
   embById: Record<string, number[]> = {},
+  // 描画済みカードの実測高さ（px）。無いカードは最悪ケースの CARD_H_LAYOUT に落ちる。
+  // 一律の想定高だと短いカードだらけの盤面が縦に間延びしていた（要望#1/#4 の質）。
+  heightById: Record<string, number> = {},
 ): Promise<LayoutResult[]> {
   if (nodes.length === 0) return [];
   const ELKConstructor = (await import('elkjs/lib/elk.bundled.js')).default;
@@ -92,7 +110,7 @@ export async function computeElkLayout(
     children: ordered.map((n) => ({
       id: n.id,
       width: NODE_W,
-      height: NODE_H,
+      height: heightById[n.id] ?? NODE_H,
       layoutOptions: {
         'elk.partitioning.partition': String(TYPE_PARTITION[n.type] ?? 0),
       },

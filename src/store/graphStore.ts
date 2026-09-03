@@ -40,6 +40,33 @@ function loadName(): string {
   }
 }
 
+/**
+ * ノードのマージ規則（upsertNode / upsertNodes 共通）。
+ * 素朴なスプレッドだと、リモート UPDATE のペイロードに含まれる x=null / y=null が
+ * 「整える」で決めたローカル座標を上書きし、誰かがカードを編集したり★を付けただけで
+ * 全員の整列がバンド配置へ戻っていた（アンケート要望#2/#4/#6 の前提バグ）。
+ * DB が実座標を持っているときだけ採用する。埋め込みも同様に温存する。
+ */
+function mergeNodes(cur: GraphNode[], incoming: GraphNode[]): GraphNode[] {
+  const next = cur.slice();
+  const idx = new Map(next.map((n, i) => [n.id, i] as const));
+  for (const n of incoming) {
+    const i = idx.get(n.id);
+    if (i === undefined) {
+      idx.set(n.id, next.length);
+      next.push(n);
+      continue;
+    }
+    const prev = next[i];
+    const merged: GraphNode = { ...prev, ...n };
+    if (n.x == null) merged.x = prev.x;
+    if (n.y == null) merged.y = prev.y;
+    if (n.embedding == null) merged.embedding = prev.embedding;
+    next[i] = merged;
+  }
+  return next;
+}
+
 interface GraphState {
   nodes: GraphNode[];
   edges: GraphEdge[];
@@ -63,9 +90,13 @@ interface GraphState {
   setNodes: (n: GraphNode[]) => void;
   setEdges: (e: GraphEdge[]) => void;
   upsertNode: (n: GraphNode) => void;
+  upsertNodes: (n: GraphNode[]) => void; // Realtime のまとめ反映（1回の set() で複数件）
   setNodePosition: (id: string, x: number, y: number) => void; // ドラッグ確定時の座標反映
+  applyPositions: (list: { id: string; x: number; y: number }[]) => void; // レイアウト結果の一括反映
   upsertEdge: (e: GraphEdge) => void;
   upsertEdges: (e: GraphEdge[]) => void; // 複数エッジを1回の set() で反映（再描画を1回に抑える）
+  editingNodeId: string | null; // 編集中カード（仮想化の一時停止に使う。下書き喪失防止）
+  setEditingNodeId: (id: string | null) => void;
   removeNode: (id: string) => void; // ノード＋接続エッジをストアから除去（削除・リモートDELETE反映）
   removeEdge: (id: string) => void; // エッジ1本を除去（リモートDELETE反映）
   removeEdgesByNode: (nodeId: string) => void; // 接続エッジのみ除去（編集の線引き直し）
@@ -135,23 +166,10 @@ export const useGraphStore = create<GraphState>((set) => ({
   setNodes: (nodes) => set({ nodes }),
   setEdges: (edges) => set({ edges }),
   upsertNode: (n) =>
-    set((s) => {
-      const i = s.nodes.findIndex((x) => x.id === n.id);
-      if (i === -1) return { nodes: [...s.nodes, n] };
-      const prev = s.nodes[i];
-      const merged: GraphNode = { ...prev, ...n };
-      // 素朴なスプレッドだと、リモート UPDATE のペイロードに含まれる x=null / y=null が
-      // 「整える」で決めたローカル座標を上書きし、誰かがカードを編集したり★を付けただけで
-      // 全員の整列がバンド配置へ戻っていた（アンケート要望#2/#4/#6 の前提バグ）。
-      // DB が実座標を持っているときだけ採用する。
-      if (n.x == null) merged.x = prev.x;
-      if (n.y == null) merged.y = prev.y;
-      // 埋め込みも UPDATE ペイロードに含まれないことがあるため同様に温存する。
-      if (n.embedding == null) merged.embedding = prev.embedding;
-      const next = s.nodes.slice();
-      next[i] = merged;
-      return { nodes: next };
-    }),
+    set((s) => ({ nodes: mergeNodes(s.nodes, [n]) })),
+  // Realtime の受信をまとめて1回の set() で反映する（イベント数ぶんの再レンダリングを防ぐ）
+  upsertNodes: (list) =>
+    set((s) => (list.length === 0 ? {} : { nodes: mergeNodes(s.nodes, list) })),
   setNodePosition: (id, x, y) =>
     set((s) => {
       const i = s.nodes.findIndex((n) => n.id === id);
@@ -159,6 +177,22 @@ export const useGraphStore = create<GraphState>((set) => ({
       const next = s.nodes.slice();
       next[i] = { ...next[i], x, y };
       return { nodes: next };
+    }),
+  // レイアウト結果（整える・関連だけ集める・ドラッグ）の一括反映。
+  // getState() スナップショットからの setNodes 全置換は、スナップショットと set の間に
+  // 届いたリモート挿入を消すレースがあるため、必ず関数型 set で現在値に対して適用する。
+  applyPositions: (list) =>
+    set((s) => {
+      if (list.length === 0) return {};
+      const map = new Map(list.map((r) => [r.id, r] as const));
+      let changed = false;
+      const next = s.nodes.map((n) => {
+        const p = map.get(n.id);
+        if (!p) return n;
+        changed = true;
+        return { ...n, x: p.x, y: p.y };
+      });
+      return changed ? { nodes: next } : {};
     }),
   upsertEdge: (e) =>
     set((s) => {
@@ -189,20 +223,42 @@ export const useGraphStore = create<GraphState>((set) => ({
       }
       return { edges: next };
     }),
+  // DELETE の Realtime 購読はフィルタ無し（Supabase 仕様）のため、他ルームの削除イベントも
+  // ここへ届く。対象が store に無いときは新しい配列を作らず {} を返し、無関係な
+  // 再レンダリングを起こさない（以前は no-op でも全購読者が再レンダリングしていた）。
   removeNode: (id) =>
-    set((s) => ({
-      nodes: s.nodes.filter((n) => n.id !== id),
-      // 接続エッジも同時に除去（DBのカスケード削除イベントに依存せずローカルを整合）
-      edges: s.edges.filter((e) => e.source_id !== id && e.target_id !== id),
-    })),
+    set((s) => {
+      const hasNode = s.nodes.some((n) => n.id === id);
+      const hasEdge = s.edges.some(
+        (e) => e.source_id === id || e.target_id === id,
+      );
+      if (!hasNode && !hasEdge) return {};
+      return {
+        nodes: hasNode ? s.nodes.filter((n) => n.id !== id) : s.nodes,
+        // 接続エッジも同時に除去（DBのカスケード削除イベントに依存せずローカルを整合）
+        edges: hasEdge
+          ? s.edges.filter((e) => e.source_id !== id && e.target_id !== id)
+          : s.edges,
+      };
+    }),
   removeEdge: (id) =>
-    set((s) => ({ edges: s.edges.filter((e) => e.id !== id) })),
+    set((s) =>
+      s.edges.some((e) => e.id === id)
+        ? { edges: s.edges.filter((e) => e.id !== id) }
+        : {},
+    ),
   removeEdgesByNode: (nodeId) =>
-    set((s) => ({
-      edges: s.edges.filter(
-        (e) => e.source_id !== nodeId && e.target_id !== nodeId,
-      ),
-    })),
+    set((s) =>
+      s.edges.some((e) => e.source_id === nodeId || e.target_id === nodeId)
+        ? {
+            edges: s.edges.filter(
+              (e) => e.source_id !== nodeId && e.target_id !== nodeId,
+            ),
+          }
+        : {},
+    ),
+  editingNodeId: null,
+  setEditingNodeId: (id) => set({ editingNodeId: id }),
   setEmbedding: (id, emb) =>
     set((s) => ({ embById: { ...s.embById, [id]: emb } })),
   setPresence: (presence) => set({ presence }),

@@ -48,6 +48,7 @@ export default function GraphCanvas({
   onDeleteNode,
   onRelabelEdge,
   onPositionsChange,
+  measureRef,
   layoutVersion,
 }: {
   onEditNode?: (id: string, text: string, type: NodeType) => void;
@@ -55,6 +56,11 @@ export default function GraphCanvas({
   onRelabelEdge?: (edgeId: string, relation: Relation) => void;
   /** ドラッグ確定・「関連だけ集める」で決まった座標を親へ返す（ストア＋DBへ保存） */
   onPositionsChange?: (results: LayoutResult[]) => void;
+  /**
+   * 描画済みカードの実測高さを取り出す関数を親へ渡す（「整える」のレイアウト計算用）。
+   * ELK に一律の想定高ではなく実寸を渡すと、短いカードの間延びが消える。
+   */
+  measureRef?: React.MutableRefObject<(() => Record<string, number>) | null>;
   layoutVersion?: number;
 } = {}) {
   const nodes = useGraphStore((s) => s.nodes);
@@ -62,6 +68,9 @@ export default function GraphCanvas({
   const showRelated = useGraphStore((s) => s.showRelated);
   const replayStep = useGraphStore((s) => s.replayStep);
   const setNodePosition = useGraphStore((s) => s.setNodePosition);
+  // 編集中は画面外カードの間引き（仮想化）を止める。仮想化中に編集カードが viewport 外へ
+  // 出ると unmount されて下書きが消える（モバイルはキーボード表示で viewport が縮むので現実に起きる）。
+  const editingNodeId = useGraphStore((s) => s.editingNodeId);
   const [selected, setSelected] = useState<string | null>(null);
   const [edgeMenu, setEdgeMenu] = useState<string | null>(null);
   // ズーム段階。onMove でバケット化して保持（同値 setState は React が再描画を省く＝境界跨ぎ時のみ再描画）。
@@ -71,6 +80,32 @@ export default function GraphCanvas({
   const lastUserMove = useRef(0);
   const prevW = useRef(typeof window !== 'undefined' ? window.innerWidth : 0);
   const lodRaf = useRef(0);
+  // rAF 間引きで最後に観測した zoom。スケジュール時のクロージャ値を使うと、
+  // 間引かれた後続イベントの新しい zoom が捨てられ、ジェスチャ終端の LOD が古くなる。
+  const lastZoom = useRef(1);
+
+  // rAF の後始末（unmount 後の setLod を防ぐ）
+  useEffect(
+    () => () => {
+      if (lodRaf.current) cancelAnimationFrame(lodRaf.current);
+    },
+    [],
+  );
+
+  // 「整える」用に、描画済みカードの実測高さを親から取れるようにする
+  useEffect(() => {
+    if (!measureRef) return;
+    measureRef.current = () => {
+      const out: Record<string, number> = {};
+      for (const n of rf.current?.getNodes() ?? []) {
+        if (n.measured?.height) out[n.id] = n.measured.height;
+      }
+      return out;
+    };
+    return () => {
+      measureRef.current = null;
+    };
+  }, [measureRef]);
 
   // 要望#3: data に生のコールバックを入れると、親の再レンダリングで参照が変わり
   // 全ノードのオブジェクトが作り直される。ref 経由の安定ラッパを渡す。
@@ -134,6 +169,8 @@ export default function GraphCanvas({
       const isSelected = selected === n.id;
       const dimmed = neighbors ? !neighbors.has(n.id) : false;
       const replaying = replayStep != null;
+      // 区切り文字必須: 区切り無しの連結だと x=12,y=345 と x=123,y=45 が同一キーに
+      // 衝突する。本文に現れない制御文字で区切る（見えない生バイトではなく明示エスケープで書く）。
       const key = [
         n.type,
         n.text,
@@ -147,7 +184,7 @@ export default function GraphCanvas({
         dimmed ? 1 : 0,
         replaying ? 1 : 0,
         lod,
-      ].join('');
+      ].join('\x1f');
       const hit = cache.get(n.id);
       seen.add(n.id);
       if (hit && hit.key === key) return hit.node;
@@ -393,16 +430,19 @@ export default function GraphCanvas({
         if (e) lastUserMove.current = Date.now();
         // 要望#3【主因5】: onMove はパン/ズームの毎フレーム発火する。LOD が境界を跨ぐと
         // 全ノードの再構築が起きるので、判定は1フレーム1回に間引く。
+        // zoom は ref 経由で常に最新値を読む（クロージャ値だと間引かれたイベントの
+        // zoom が捨てられ、ジェスチャ終端の LOD が1テンポ古くなる）。
+        lastZoom.current = vp.zoom;
         if (lodRaf.current) return;
         lodRaf.current = requestAnimationFrame(() => {
           lodRaf.current = 0;
-          setLod((cur) => lodWithHysteresis(vp.zoom, cur));
+          setLod((cur) => lodWithHysteresis(lastZoom.current, cur));
         });
       }}
       deleteKeyCode={null}
       // 要望#3: 既定では画面外のカードも全部 DOM に存在し、再計測の対象になっていた。
-      // 表示範囲のカードだけ描画する。
-      onlyRenderVisibleElements
+      // 表示範囲のカードだけ描画する。ただし編集中は間引かない（unmount で下書きが消えるため）。
+      onlyRenderVisibleElements={editingNodeId == null}
       fitView
       minZoom={0.2}
       maxZoom={2}

@@ -66,6 +66,8 @@ export default function Room() {
   // sm 以上（PC・投影）では相関図のみで、この切替は出さない。
   const [mobileView, setMobileView] = useState<'graph' | 'focus'>('graph');
   const embeddingBusy = useRef(false);
+  // GraphCanvas から「描画済みカードの実測高さ」を取り出す窓口（tidy のレイアウト計算用）
+  const measureRef = useRef<(() => Record<string, number>) | null>(null);
 
   const { room } = useRoom(roomId);
   useRealtimeNodes(roomId);
@@ -169,16 +171,19 @@ export default function Room() {
         all,
         engine?.candidateParams,
       );
-      const existing = new Set(
-        state.edges.flatMap((e) => [
-          `${e.source_id}>${e.target_id}`,
-          `${e.target_id}>${e.source_id}`,
-        ]),
-      );
       // room 取得前（engine 未生成）は cosine 安全側
       const proposed = engine
         ? await engine.classify(targetWithEmb, candidates)
         : classifyLinksCosine(targetWithEmb, candidates);
+      // 既存エッジ集合は classify の await の「後」に取り直す。
+      // await 前のスナップショットだと、同時進行の別 linkNode が引いた線に気づけず、
+      // A→B と B→A の逆向き重複エッジが両方 DB に入っていた（DBの一意制約は向き別）。
+      const existing = new Set(
+        useGraphStore.getState().edges.flatMap((e) => [
+          `${e.source_id}>${e.target_id}`,
+          `${e.target_id}>${e.source_id}`,
+        ]),
+      );
       // 要望#3【主因2】: 以前は提案エッジを1本ずつ upsert していたため、
       // 1カード投稿で「1(node) + k(edges)」回の全再描画と realtime 配信が
       // 全参加者の端末で発生していた。まとめて1回の更新・1回の書き込みにする。
@@ -401,19 +406,20 @@ export default function Room() {
   // Phase 0: 決まった座標をストア＋DB に反映する。
   // 以前は「整える」の結果がストアにしか無く、リロードで消え、他端末にも伝わらなかった。
   // ドラッグ確定・「関連だけ集める」・「整える」の共通の保存経路。
-  const savePositions = useCallback(
-    async (results: LayoutResult[]) => {
-      if (results.length === 0) return;
-      const map = new Map(results.map((r) => [r.id, r] as const));
-      const cur = useGraphStore.getState().nodes;
-      setNodes(
-        cur.map((n) => {
-          const p = map.get(n.id);
-          return p ? { ...n, x: p.x, y: p.y } : n;
-        }),
-      );
-      if (!supabase) return;
-      const db = supabase;
+  //
+  // 設計メモ（自己批判からの修正・2026-09-03）:
+  // - store 反映は applyPositions（関数型 set）。getState スナップショットからの
+  //   setNodes 全置換は、スナップショット後に届いたリモート挿入を消すレースがあった。
+  // - DB 書き込みは待たない（fire-and-forget）。以前は N 件の UPDATE を await して
+  //   から呼び出し側が fitView していたため、教室回線で「整える」が数秒固まっていた。
+  // - per-row UPDATE は Realtime 経由で全員に N イベント届くが、受信側は
+  //   useRealtimeNodes のまとめ反映（80ms 窓）で1回の再レンダリングに畳まれる。
+  const savePositions = useCallback((results: LayoutResult[]) => {
+    if (results.length === 0) return;
+    useGraphStore.getState().applyPositions(results);
+    if (!supabase) return;
+    const db = supabase;
+    void (async () => {
       // 1行ずつの UPDATE を 25 件並列 × チャンクで流す。
       // upsert 一括だと本文まで上書きしてしまい、同時編集を踏み潰すため使わない。
       for (let i = 0; i < results.length; i += 25) {
@@ -430,9 +436,8 @@ export default function Room() {
           ),
         );
       }
-    },
-    [setNodes],
-  );
+    })();
+  }, []);
 
   const createNode = useCallback(
     async (type: NodeType, text: string) => {
@@ -513,17 +518,27 @@ export default function Room() {
     setTidying(true);
     try {
       const state = useGraphStore.getState();
+      // 描画済みカードの実測高さ。一律の想定高（220px）だと短いカードだらけの盤面が
+      // 間延びする。未計測のカード（画面外で間引かれた等）は ELK 側の既定値に落ちる。
+      const heights = measureRef.current?.() ?? {};
       let res: LayoutResult[];
       try {
         // クラスタ配置＋交差最小化（elkjs・動的ロード）。
         // 要望#4: 帯の中の並び順を埋め込みの類似度で決め、似た案が隣り合うようにする。
-        res = await computeElkLayout(state.nodes, state.edges, state.embById);
+        res = await computeElkLayout(
+          state.nodes,
+          state.edges,
+          state.embById,
+          heights,
+        );
       } catch {
         // 失敗時は従来の d3-force にフォールバック
         res = computeLayout(state.nodes, state.edges);
       }
-      // Phase 0: ストアだけでなく DB にも保存する（リロード・他端末で消えないように）
-      await savePositions(res);
+      // Phase 0: ストアだけでなく DB にも保存する（リロード・他端末で消えないように）。
+      // DB 書き込みは savePositions 内で fire-and-forget。ここで待たない
+      // （以前は N 件の UPDATE を待ってから fitView しており、教室回線で数秒固まった）。
+      savePositions(res);
       setLayoutVersion((v) => v + 1);
     } finally {
       setTidying(false);
@@ -591,12 +606,13 @@ export default function Room() {
             onDeleteNode={deleteNode}
             onRelabelEdge={relabelEdge}
             onPositionsChange={savePositions}
+            measureRef={measureRef}
             layoutVersion={layoutVersion}
           />
         </div>
         {mobileView === 'focus' && (
           <div className="sm:hidden absolute inset-0">
-            <FocusView onDeleteNode={deleteNode} />
+            <FocusView onEditNode={editNode} onDeleteNode={deleteNode} />
           </div>
         )}
       </div>

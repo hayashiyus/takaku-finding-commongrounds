@@ -1,10 +1,16 @@
-import { memo, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import type { NodeProps } from '@xyflow/react';
 import { NODE_META, NODE_TYPE_ORDER } from '../lib/relations';
 import { CARD_W } from '../lib/cardMetrics';
 import { NODE_TEXT_MAX, validateNodeText } from '../lib/validation';
+import { useGraphStore } from '../store/graphStore';
 import type { NodeType } from '../types';
+
+// 編集の開始/終了をストアに知らせる（GraphCanvas が仮想化を一時停止して下書き喪失を防ぐ）。
+// 購読はせず getState() のアクションだけを呼ぶ＝他カードの再レンダリングは発生しない。
+const markEditing = (id: string | null) =>
+  useGraphStore.getState().setEditingNodeId(id);
 
 export interface NodeCardData {
   id: string;
@@ -65,11 +71,21 @@ function NodeCard({ data }: NodeProps) {
   const showControls =
     canManage && lod !== 'low' && (selected || mode !== 'view');
 
+  // ルーム退出などでカードごと unmount されたときの編集フラグ解除
+  useEffect(
+    () => () => {
+      const st = useGraphStore.getState();
+      if (st.editingNodeId === d.id) st.setEditingNodeId(null);
+    },
+    [d.id],
+  );
+
   const startEdit = () => {
     setDraft(d.text);
     setDraftType(d.type);
     setErr(null);
     setMode('edit');
+    markEditing(d.id);
   };
   const save = () => {
     // 要望#7: 短すぎる入力をここで止める。以前は trim() の空チェックしか無かった。
@@ -81,10 +97,12 @@ function NodeCard({ data }: NodeProps) {
     d.onEdit?.(d.id, draft.trim(), draftType);
     setErr(null);
     setMode('view');
+    markEditing(null);
   };
   const cancel = () => {
     setErr(null);
     setMode('view');
+    markEditing(null);
   };
   const doDelete = () => {
     d.onDelete?.(d.id);

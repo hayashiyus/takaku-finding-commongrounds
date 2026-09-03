@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import ExportPdfButton from './ExportPdfButton';
 import FinalIdeaPanel from './FinalIdeaPanel';
 import PresenceBar from './PresenceBar';
@@ -6,7 +6,11 @@ import ShareButton from './ShareButton';
 import Timeline from './Timeline';
 import type { RoomMode } from '../types';
 
-export default function TopBar({
+// memo 必須: 親の Room はストアの nodes を購読しており、カード追加・座標更新・
+// ドラッグ中の毎フレームで再レンダリングされる。TopBar が素通しだと
+// Timeline / FinalIdeaPanel / PresenceBar まで毎回連鎖する（要望#3【主因6】）。
+// props（roomId / mode / useCallback 済みの onTidy / tidying）は安定なので memo が効く。
+function TopBar({
   roomId,
   mode,
   onTidy,
@@ -91,3 +95,5 @@ export default function TopBar({
     </div>
   );
 }
+
+export default memo(TopBar);

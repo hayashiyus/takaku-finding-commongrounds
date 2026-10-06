@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { PRO_ENABLED } from '../lib/proEnabled';
 import { supabase } from '../lib/supabaseClient';
 import type { RoomMode } from '../types';
 
@@ -17,8 +18,10 @@ export default function Home() {
   const [creating, setCreating] = useState<RoomMode | null>(null);
   const [createError, setCreateError] = useState('');
 
-  const createRoom = async (mode: RoomMode) => {
+  const createRoom = async (requested: RoomMode) => {
     if (creating) return;
+    // PRO 停止中は PRO ルームを作らない（ボタンも出さないが、念のためここでも lite に寄せる）
+    const mode: RoomMode = PRO_ENABLED ? requested : 'lite';
     setCreating(mode);
     setCreateError('');
     const id = randomRoomId();
@@ -56,30 +59,34 @@ export default function Home() {
         誰が言ったか・声の大きさに左右されず、全員の視点を一貫した基準で公平に扱います。
       </p>
 
-      <div className="flex flex-col sm:flex-row gap-4 w-full max-w-2xl">
-        <button
-          onClick={() => void createRoom('pro')}
-          disabled={creating !== null}
-          className="flex-1 text-left font-jp rounded-xl border-2 p-5 bg-white hover:shadow-md transition-shadow disabled:opacity-60"
-          style={{ borderColor: '#f59e0b' }}
-        >
-          <div className="flex items-center gap-2 mb-1.5">
-            <span
-              className="font-mono text-[10px] font-bold rounded px-1.5 py-0.5"
-              style={{ background: '#fef3c7', color: '#b45309' }}
-            >
-              PRO
-            </span>
-            <span className="font-bold text-[16px]">本番LLM版</span>
-          </div>
-          <div className="text-[12.5px] text-ink-soft leading-relaxed">
-            クラウドAI（Claude）が「根拠づける・対立する・具体化する・再枠組みする・関連」の
-            <b>5種の関係</b>を高精度に判定。講演会・体験デモ向け。
-          </div>
-          <div className="text-[11px] text-ink-soft mt-1.5 opacity-70">
-            API利用（少額のコストが発生・ルーム単位の上限つき）
-          </div>
-        </button>
+      <div
+        className={`flex flex-col sm:flex-row gap-4 w-full ${PRO_ENABLED ? 'max-w-2xl' : 'max-w-sm'}`}
+      >
+        {PRO_ENABLED && (
+          <button
+            onClick={() => void createRoom('pro')}
+            disabled={creating !== null}
+            className="flex-1 text-left font-jp rounded-xl border-2 p-5 bg-white hover:shadow-md transition-shadow disabled:opacity-60"
+            style={{ borderColor: '#f59e0b' }}
+          >
+            <div className="flex items-center gap-2 mb-1.5">
+              <span
+                className="font-mono text-[10px] font-bold rounded px-1.5 py-0.5"
+                style={{ background: '#fef3c7', color: '#b45309' }}
+              >
+                PRO
+              </span>
+              <span className="font-bold text-[16px]">本番LLM版</span>
+            </div>
+            <div className="text-[12.5px] text-ink-soft leading-relaxed">
+              クラウドAI（Claude）が「根拠づける・対立する・具体化する・再枠組みする・関連」の
+              <b>5種の関係</b>を高精度に判定。講演会・体験デモ向け。
+            </div>
+            <div className="text-[11px] text-ink-soft mt-1.5 opacity-70">
+              API利用（少額のコストが発生・ルーム単位の上限つき）
+            </div>
+          </button>
+        )}
 
         <button
           onClick={() => void createRoom('lite')}

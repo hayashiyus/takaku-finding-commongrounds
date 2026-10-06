@@ -1,6 +1,7 @@
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { classify } from './api/_classify';
+import { isProEnabled } from './api/_proGate';
 import { synthesizeStream } from './api/_synthesize';
 
 // dev/prod parity: 本番は /api/classify-links が Vercel Function。
@@ -19,8 +20,13 @@ export default defineConfig(({ mode }) => {
   };
   const maxCalls = Number(env.LLM_MAX_CALLS_PER_ROOM ?? 400);
   const devQuota = new Map<string, number>(); // roomId -> calls（dev用・非永続）
+  // PRO の有効化は PRO_ENABLED=1 の1変数で決まる（api/_proGate.ts）。loadEnv の接頭辞 '' は
+  // ビルド時の process.env も取り込むので、Vercel の環境変数がそのまま画面側にも効く。
+  const proEnabled = isProEnabled(env.PRO_ENABLED);
 
   return {
+    // 画面側（PROボタン・PROルームの扱い）へ真偽値だけを埋め込む。値そのもの以外は露出しない。
+    define: { __PRO_ENABLED__: JSON.stringify(proEnabled) },
     plugins: [
       react(),
       {
@@ -36,6 +42,10 @@ export default defineConfig(({ mode }) => {
             req.on('data', (c) => (body += c));
             req.on('end', () => {
               res.setHeader('content-type', 'application/json');
+              if (!proEnabled) {
+                res.end(JSON.stringify({ links: [], error: 'pro_disabled' }));
+                return;
+              }
               let parsed: { room_id?: unknown } = {};
               try {
                 parsed = JSON.parse(body || '{}');
@@ -80,6 +90,11 @@ export default defineConfig(({ mode }) => {
             if (req.method !== 'POST') {
               res.statusCode = 405;
               res.end('{}');
+              return;
+            }
+            if (!proEnabled) {
+              res.setHeader('content-type', 'application/json');
+              res.end(JSON.stringify({ error: 'pro_disabled' }));
               return;
             }
 

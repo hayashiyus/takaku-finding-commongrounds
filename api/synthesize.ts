@@ -1,5 +1,6 @@
 // Vercel Function（Edge）— FINAL IDEA のAI統合案をストリーミング生成（対立の止揚）。APIキーはサーバ側 process.env のみで参照。クライアントへは出さない。
 import { synthesizeStream } from './_synthesize';
+import { isProEnabled } from './_proGate';
 import { checkQuota } from './_quota';
 
 export const config = { runtime: 'edge' };
@@ -18,6 +19,9 @@ const NODE_TYPES = ['fact', 'insight', 'idea', 'hypothesis'] as const;
 
 export default async function handler(req: Request): Promise<Response> {
   if (req.method !== 'POST') return json({ error: 'method not allowed' }, 405);
+  // PRO 停止中は本文も読まずに返す（LLM・quota RPC のどちらにも到達させない）
+  if (!isProEnabled(process.env.PRO_ENABLED))
+    return json({ error: 'pro_disabled' });
   try {
     let body: { room_id?: unknown; nodes?: unknown; edges?: unknown };
     try {

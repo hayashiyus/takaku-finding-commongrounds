@@ -1,6 +1,7 @@
 // Vercel Function（Edge）— 型付き関係分類（SPEC §7.3）＋ ルーム単位の呼び出し上限（quota）。
 // APIキー（LLM_API_KEY）・service_role キーはサーバ側 process.env のみで参照。クライアントへは出さない。
 import { classify } from './_classify';
+import { isProEnabled } from './_proGate';
 import { checkQuota } from './_quota';
 
 export const config = { runtime: 'edge' };
@@ -14,6 +15,9 @@ function json(d: unknown, s = 200): Response {
 
 export default async function handler(req: Request): Promise<Response> {
   if (req.method !== 'POST') return json({ error: 'method not allowed' }, 405);
+  // PRO 停止中は本文も読まずに返す（LLM・quota RPC のどちらにも到達させない）
+  if (!isProEnabled(process.env.PRO_ENABLED))
+    return json({ links: [], error: 'pro_disabled' });
   try {
     const body = await req.json();
     const roomId: string | undefined =

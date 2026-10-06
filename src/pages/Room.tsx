@@ -18,6 +18,7 @@ import { computeElkLayout } from '../lib/elkLayout';
 import { embed, loadEmbedder } from '../lib/embeddings';
 import { getLinkEngine } from '../lib/linkEngine';
 import { classifyLinksCosine, selectCandidates } from '../lib/linking';
+import { PRO_ENABLED } from '../lib/proEnabled';
 import { SEED_NODES } from '../lib/seed';
 import { supabase, supabaseReady } from '../lib/supabaseClient';
 import { validateNodeText } from '../lib/validation';
@@ -76,10 +77,11 @@ export default function Room() {
 
   // ルーム単位モード（rooms.mode）。Supabase 未設定＝オフライン授業は lite。
   // room 取得中（supabase あり）は null → エンジン未生成（createNode は cosine 安全側）。
+  // PRO 停止中（PRO_ENABLED 未設定）は、既存の PRO ルームも LITE として動かす。
   const mode: RoomMode | null = !supabaseReady
     ? 'lite'
     : room
-      ? room.mode === 'pro'
+      ? room.mode === 'pro' && PRO_ENABLED
         ? 'pro'
         : 'lite'
       : null;
